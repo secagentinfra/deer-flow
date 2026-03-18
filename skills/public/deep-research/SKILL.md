@@ -1,198 +1,137 @@
 ---
 name: deep-research
-description: Use this skill instead of WebSearch for ANY question requiring web research. Trigger on queries like "what is X", "explain X", "compare X and Y", "research X", or before content generation tasks. Provides systematic multi-angle research methodology instead of single superficial searches. Use this proactively when the user's question needs online information.
+description: Use this skill for ANY question requiring comprehensive web research. Provides structured research methodology with dynamic outline, evidence bank, and hierarchical writing. Use proactively when the user's question needs thorough online information.
 ---
 
-# Deep Research Skill
+# Deep Research v2 Skill
 
 ## Overview
 
-This skill provides a systematic methodology for conducting thorough web research. **Load this skill BEFORE starting any content generation task** to ensure you gather sufficient information from multiple angles, depths, and sources.
+This skill implements a structured deep research methodology inspired by state-of-the-art research systems. It uses a dynamic outline, structured evidence bank, and hierarchical writing to produce comprehensive, well-cited research reports.
 
 ## When to Use This Skill
 
 **Always load this skill when:**
-
-### Research Questions
-- User asks "what is X", "explain X", "research X", "investigate X"
-- User wants to understand a concept, technology, or topic in depth
-- The question requires current, comprehensive information from multiple sources
-- A single web search would be insufficient to answer properly
-
-### Content Generation (Pre-research)
-- Creating presentations (PPT/slides)
-- Creating frontend designs or UI mockups
-- Writing articles, reports, or documentation
-- Producing videos or multimedia content
-- Any content that requires real-world information, examples, or current data
-
-## Core Principle
-
-**Never generate content based solely on general knowledge.** The quality of your output directly depends on the quality and quantity of research conducted beforehand. A single search query is NEVER enough.
+- User asks "research X", "investigate X", "write a report on X"
+- The question requires comprehensive, multi-source information
+- A single web search would be insufficient
+- Before content generation tasks that need factual grounding
 
 ## Research Methodology
 
-### Phase 1: Broad Exploration
+### Phase 0: Research Brief & Initial Outline (1 step)
 
-Start with broad searches to understand the landscape:
+1. Analyze the user query to identify key dimensions and subtopics
+2. Create an initial outline draft (≤4 levels deep) using `outline_update`:
+   ```
+   ## 1. Introduction
 
-1. **Initial Survey**: Search for the main topic to understand the overall context
-2. **Identify Dimensions**: From initial results, identify key subtopics, themes, angles, or aspects that need deeper exploration
-3. **Map the Territory**: Note different perspectives, stakeholders, or viewpoints that exist
+   ### 1.1 Background
 
-Example:
-```
-Topic: "AI in healthcare"
-Initial searches:
-- "AI healthcare applications 2024"
-- "artificial intelligence medical diagnosis"
-- "healthcare AI market trends"
+   ### 1.2 Problem Statement
 
-Identified dimensions:
-- Diagnostic AI (radiology, pathology)
-- Treatment recommendation systems
-- Administrative automation
-- Patient monitoring
-- Regulatory landscape
-- Ethical considerations
-```
+   ## 2. [Main Dimension 1]
 
-### Phase 2: Deep Dive
+   ### 2.1 [Subtopic]
 
-For each important dimension identified, conduct targeted research:
+   ### 2.2 [Subtopic]
+   ...
+   ```
+3. This initial outline has NO source annotations — that's expected
 
-1. **Specific Queries**: Search with precise keywords for each subtopic
-2. **Multiple Phrasings**: Try different keyword combinations and phrasings
-3. **Fetch Full Content**: Use `web_fetch` to read important sources in full, not just snippets
-4. **Follow References**: When sources mention other important resources, search for those too
+### Phase 1: Dynamic Research Loop (≥3 iterations)
 
-Example:
-```
-Dimension: "Diagnostic AI in radiology"
-Targeted searches:
-- "AI radiology FDA approved systems"
-- "chest X-ray AI detection accuracy"
-- "radiology AI clinical trials results"
+**Stage 1 Rules: Information Collection**
+- Focus on COMPREHENSIVENESS: cover ALL key dimensions
+- Use BULLET POINTS, not paragraphs
+- Record key data points and causal relationships
+- Note surprising findings and contradictions
 
-Then fetch and read:
-- Key research papers or summaries
-- Industry reports
-- Real-world case studies
-```
+**Each iteration (anchored by `research_reflect`):**
 
-### Phase 3: Diversity & Validation
+1. **Reflect**: Call `research_reflect` — it returns:
+   - Semantic completeness assessment (LLM-driven, not programmatic coverage)
+   - `suggested_queries`: targeted search queries for next round
+   - `outline_evolution`: suggestions for outline restructuring
+   - Whether to continue researching or proceed to writing
+2. **Evolve outline**: If `outline_evolution` suggests changes (new sections, merges, splits),
+   call `outline_update` with the restructured outline
+3. **Search**: Use `suggested_queries` from reflection as primary search targets.
+   Call `check_query_duplicate` for each, then `web_search` for non-duplicate queries
+4. **Select & Fetch**: Review search results, select top 2-3 most relevant URLs, call `web_fetch` for each
+5. **Extract & Store**: For each fetched page, call `evidence_store` with:
+   - `summary`: 1-2 sentence summary of relevance
+   - `evidence`: Detailed extracted quotes, data points, key findings
+   - `goal`: The search goal this evidence relates to
+6. **Update outline sources**: Call `outline_update` to add `[sources: 1, 2]` annotations
+   below subsections with new evidence:
+   ```
+   ### 2.1 Architecture Overview
+   [sources: 4, 5, 6]
+   ```
+7. **Loop**: Go back to step 1 (next `research_reflect` call = next iteration)
 
-Ensure comprehensive coverage by seeking diverse information types:
+**CRITICAL REMINDERS for Phase 1:**
+- `research_reflect` is the cycle anchor — follow its `suggested_queries` and `outline_evolution` guidance
+- Each subsection needs a `[sources: 1, 2]` line below it (NOT in the heading)
+- Do NOT use `<citation>` tags — they are deprecated
+- Do NOT invent your own search direction when `suggested_queries` is available
+- If `outline_evolution` suggests new sections or restructuring, update the outline FIRST
+- Fetch FULL content for promising results, don't rely on snippets
+- After storing evidence, ALWAYS update the outline with new source IDs
 
-| Information Type | Purpose | Example Searches |
-|-----------------|---------|------------------|
-| **Facts & Data** | Concrete evidence | "statistics", "data", "numbers", "market size" |
-| **Examples & Cases** | Real-world applications | "case study", "example", "implementation" |
-| **Expert Opinions** | Authority perspectives | "expert analysis", "interview", "commentary" |
-| **Trends & Predictions** | Future direction | "trends 2024", "forecast", "future of" |
-| **Comparisons** | Context and alternatives | "vs", "comparison", "alternatives" |
-| **Challenges & Criticisms** | Balanced view | "challenges", "limitations", "criticism" |
+### Phase 2: Hierarchical Writing
 
-### Phase 4: Synthesis Check
+**Stage 2 Rules: Report Generation**
+- Focus on INSIGHTFULNESS: granular analysis, causal relationships
+- Focus on HELPFULNESS: fluent, coherent, logical structure
+- Every factual statement MUST have inline citation
+- Include ≥2 tables with post-table analysis
 
-Before proceeding to content generation, verify:
+**For each section in the outline:**
 
-- [ ] Have I searched from at least 3-5 different angles?
-- [ ] Have I fetched and read the most important sources in full?
-- [ ] Do I have concrete data, examples, and expert perspectives?
-- [ ] Have I explored both positive aspects and challenges/limitations?
-- [ ] Is my information current and from authoritative sources?
+1. **Read sources**: Look at the `[sources: X, Y]` line below the section heading
+2. **Retrieve evidence**: Call `evidence_retrieve` with those source IDs
+3. **Write section**: Analyze the evidence and write the section content with inline citations `[id_X]`
+4. **Move to next section**: Repeat for all sections
 
-**If any answer is NO, continue researching before generating content.**
+**CRITICAL REMINDERS for Phase 2:**
+- Cite EVERY factual statement: `According to [id_X], ...` or `... [id_X, id_Y]`
+- Analyze WHY findings matter, don't just enumerate
+- Each section should have ≥2 paragraphs of analysis
+- NO shallow enumeration without interpretation
+- NO statistics without context and analysis
 
-## Search Strategy Tips
+### Phase 3: Report Assembly
+
+1. Combine all sections into a single report
+2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
+3. Generate References list from evidence bank: `[id_X] Title - URL`
+4. Save as `research_{topic}_{YYYYMMDD}.md` in `/mnt/user-data/outputs/`
+5. Call `present_file` to deliver the report
+
+## Search Strategy
 
 ### Effective Query Patterns
-
-```
-# Be specific with context
-❌ "AI trends"
-✅ "enterprise AI adoption trends 2024"
-
-# Include authoritative source hints
-"[topic] research paper"
-"[topic] McKinsey report"
-"[topic] industry analysis"
-
-# Search for specific content types
-"[topic] case study"
-"[topic] statistics"
-"[topic] expert interview"
-
-# Use temporal qualifiers — always use the ACTUAL current year from <current_date>
-"[topic] 2026"   # ← replace with real current year, never hardcode a past year
-"[topic] latest"
-"[topic] recent developments"
-```
+- Be specific: "enterprise AI adoption trends 2026" not "AI trends"
+- Include authority hints: "[topic] research paper", "[topic] McKinsey report"
+- Search for specific types: "[topic] case study", "[topic] statistics"
+- Use temporal qualifiers from <current_date>
 
 ### Temporal Awareness
+Always check `<current_date>` before forming search queries. Use appropriate time precision.
 
-**Always check `<current_date>` in your context before forming ANY search query.**
+### Scaling (Self-Balancing)
+- Simple query: 5-10 searches, 1-2 research iterations
+- Medium query: 10-20 searches, 2-3 research iterations
+- Complex query: 20+ searches, 3+ research iterations
 
-`<current_date>` gives you the full date: year, month, day, and weekday (e.g. `2026-02-28, Saturday`). Use the right level of precision depending on what the user is asking:
+## Quality Gates
 
-| User intent | Temporal precision needed | Example query |
-|---|---|---|
-| "today / this morning / just released" | **Month + Day** | `"tech news February 28 2026"` |
-| "this week" | **Week range** | `"technology releases week of Feb 24 2026"` |
-| "recently / latest / new" | **Month** | `"AI breakthroughs February 2026"` |
-| "this year / trends" | **Year** | `"software trends 2026"` |
+Research readiness is assessed by `research_reflect` (LLM-driven semantic evaluation):
+1. ✅ LLM quantitative assessment: scores each of 5 dimensions (0-100%), requires average >90% and no critical <70%
+2. ✅ ≥3 research iterations completed (hard gate, counted by `research_reflect` calls)
+3. ✅ ≥10 unique sources in evidence bank (hard gate)
+4. ⛔ Safety cap: 15 iterations max
 
-**Rules:**
-- When the user asks about "today" or "just released", use **month + day + year** in your search queries to get same-day results
-- Never drop to year-only when day-level precision is needed — `"tech news 2026"` will NOT surface today's news
-- Try multiple phrasings: numeric form (`2026-02-28`), written form (`February 28 2026`), and relative terms (`today`, `this week`) across different queries
-
-❌ User asks "what's new in tech today" → searching `"new technology 2026"` → misses today's news
-✅ User asks "what's new in tech today" → searching `"new technology February 28 2026"` + `"tech news today Feb 28"` → gets today's results
-
-### When to Use web_fetch
-
-Use `web_fetch` to read full content when:
-- A search result looks highly relevant and authoritative
-- You need detailed information beyond the snippet
-- The source contains data, case studies, or expert analysis
-- You want to understand the full context of a finding
-
-### Iterative Refinement
-
-Research is iterative. After initial searches:
-1. Review what you've learned
-2. Identify gaps in your understanding
-3. Formulate new, more targeted queries
-4. Repeat until you have comprehensive coverage
-
-## Quality Bar
-
-Your research is sufficient when you can confidently answer:
-- What are the key facts and data points?
-- What are 2-3 concrete real-world examples?
-- What do experts say about this topic?
-- What are the current trends and future directions?
-- What are the challenges or limitations?
-- What makes this topic relevant or important now?
-
-## Common Mistakes to Avoid
-
-- ❌ Stopping after 1-2 searches
-- ❌ Relying on search snippets without reading full sources
-- ❌ Searching only one aspect of a multi-faceted topic
-- ❌ Ignoring contradicting viewpoints or challenges
-- ❌ Using outdated information when current data exists
-- ❌ Starting content generation before research is complete
-
-## Output
-
-After completing research, you should have:
-1. A comprehensive understanding of the topic from multiple angles
-2. Specific facts, data points, and statistics
-3. Real-world examples and case studies
-4. Expert perspectives and authoritative sources
-5. Current trends and relevant context
-
-**Only then proceed to content generation**, using the gathered information to create high-quality, well-informed content.
+NOTE: No programmatic coverage percentage. The LLM evaluator is the sole judge of research completeness.

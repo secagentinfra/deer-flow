@@ -57,6 +57,11 @@ def web_fetch_tool(url: str) -> str:
         return f"Error: {res['failed_results'][0]['error']}"
     elif "results" in res and len(res["results"]) > 0:
         result = res["results"][0]
-        return f"# {result['title']}\n\n{result['raw_content'][:4096]}"
+        content = f"# {result['title']}\n\n{result['raw_content'][:24000]}"
+        return (
+            f"{content}\n\n"
+            "⚠️ REMINDER: You MUST call `evidence_store` for ALL useful findings "
+            "before moving on. Unstored evidence cannot be cited in the report."
+        )
     else:
         return "Error: No results found"
