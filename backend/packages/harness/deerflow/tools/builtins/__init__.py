@@ -5,7 +5,6 @@ from .research_tools import (
     evidence_retrieve_tool,
     evidence_store_tool,
     outline_update_tool,
-    research_reflect_tool,
 )
 from .setup_agent_tool import setup_agent
 from .task_tool import task_tool
@@ -20,6 +19,5 @@ __all__ = [
     "evidence_store_tool",
     "evidence_retrieve_tool",
     "outline_update_tool",
-    "research_reflect_tool",
     "check_query_duplicate_tool",
 ]

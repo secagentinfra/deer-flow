@@ -1,4 +1,4 @@
-"""Research tools for Deep Research v2: Memory Bank, Outline Management, and LLM Reflection."""
+"""Research tools for Deep Research v2: Memory Bank and Outline Management."""
 
 import json
 import re
@@ -12,66 +12,6 @@ from langgraph.typing import ContextT
 from deerflow.agents.thread_state import ThreadState
 
 _mb_lock = threading.Lock()
-
-
-REFLECTION_PROMPT = """You are a research completeness evaluator analyzing research about: {user_query}
-
-## Current Outline (with source annotations)
-{outline}
-
-## Source Summaries
-{summaries}
-
-## Context
-- Research iteration: {iteration}
-- Total unique sources: {total_sources}
-
-## Task 1: Semantic Completeness Assessment
-
-Assess research completeness using these quantitative criteria (assign 0-100% to each):
-
-1. **Core mechanisms / components** (weight: critical):
-   - 90-100%: Comprehensive with specific details and examples
-   - 70-89%: Substantial but missing some specifics
-   - 40-69%: Basic overview only
-   - 0-39%: Minimal or missing
-2. **Empirical data / benchmarks**: Quantitative data, metrics, case studies?
-3. **Comparative analysis**: Alternatives, tradeoffs, competing approaches?
-4. **Limitations / failure modes**: Weaknesses, constraints, open challenges?
-5. **Timeliness**: Information current and from recent sources?
-
-Research is "complete" ONLY when average coverage exceeds 90% AND no critical dimension falls below 70%.
-
-IMPORTANT: Err on the side of setting research_complete to false if there is ANY doubt about thoroughness. When in doubt, continue researching.
-
-## Task 2: Outline Evolution Analysis
-
-Examine whether the current evidence reveals topics NOT yet in the outline:
-- Do any source summaries discuss aspects not represented as outline sections?
-- Are any outline sections redundant or overlapping?
-- Should any section be split into more specific subsections?
-- Does the outline structure match the natural structure of the topic?
-- Have search efforts been too narrow (concentrated on few angles)?
-
-## Task 3: Next Search Direction
-
-If research is not complete, suggest 2-3 specific search queries targeting the most pressing gaps.
-Each query should be specific (5-10 key terms), not generic.
-Queries MUST relate to the original research topic: {user_query}
-NEVER suggest queries that would lead research away from the original topic.
-
-## Required Output
-Return a JSON object (no markdown code fences):
-{{
-  "research_complete": true or false,
-  "section_gaps": {{"Section Name": "Brief gap description"}},
-  "priority_section": "The section name with the most pressing gap",
-  "knowledge_gap": "What specific information or angle is most needed next",
-  "suggested_queries": ["specific targeted query 1", "specific targeted query 2"],
-  "outline_evolution": "Natural language suggestions for outline changes: new sections to add, sections to merge/split, restructuring advice. Write 'No changes needed' if outline is well-structured.",
-  "reasoning": "2-3 sentence overall assessment"
-}}
-"""
 
 
 def _get_workspace_path(runtime: ToolRuntime[ContextT, ThreadState] | None) -> Path:
@@ -130,45 +70,6 @@ def _parse_outline(outline: str) -> dict[str, list[int]]:
     return result
 
 
-def _extract_user_query(runtime: ToolRuntime[ContextT, ThreadState] | None) -> str:
-    """Extract the user's original query from runtime state messages."""
-    if runtime and runtime.state.get("messages"):
-        for msg in runtime.state["messages"]:
-            if hasattr(msg, "type") and msg.type == "human":
-                return str(msg.content)[:500]
-    return "(unknown research topic)"
-
-
-def _extract_json(text: str) -> dict | None:
-    """Robustly extract JSON from LLM response, handling fences and surrounding text."""
-    # Try 1: Extract from <answer> tags (EDR pattern)
-    match = re.search(r"<answer>\s*(.*?)\s*</answer>", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    # Try 2: Extract from markdown code fences
-    match = re.search(r"```(?:json)?\n(.*?)\n```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    # Try 3: Find first {...} JSON block
-    match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    # Try 4: Parse entire content as JSON
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
 @tool("evidence_store", parse_docstring=True)
 def evidence_store_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
@@ -208,12 +109,11 @@ def evidence_store_tool(
         })
         _save_memory_bank(workspace, mb)
         total_sources = len(mb["page_info"])
-        research_iterations = mb.get("research_iterations", 0)
     return (
         f"Stored as id_{new_id}. Total sources: {total_sources}. "
-        f"Research iterations: {research_iterations}. Summary: {summary}\n"
+        f"Summary: {summary}\n"
         "REMINDER: Next steps — update outline with this source ID, "
-        "then call research_reflect to assess progress."
+        "then call task(subagent_type='reflection') to assess progress."
     )
 
 
@@ -305,158 +205,8 @@ def outline_update_tool(
         "REMINDER:\n"
         "- Each subsection needs a [sources: 1, 2] line below it (outline tracking ONLY)\n"
         "- In writing phase: use inline [id_X] format, call evidence_retrieve BEFORE each section\n"
-        "- Call research_reflect to assess completeness and get next search suggestions."
+        "- Call task(subagent_type='reflection') to assess completeness and get next search suggestions."
     )
-
-
-@tool("research_reflect", parse_docstring=True)
-def research_reflect_tool(
-    runtime: ToolRuntime[ContextT, ThreadState],
-) -> str:
-    """Reflect on current research progress using LLM-based semantic evaluation.
-
-    This is the research cycle's control center. Each call counts as one research
-    iteration. Returns a structured reflection with:
-    - Completeness assessment (LLM-driven, not programmatic coverage)
-    - Identified semantic gaps and priority section
-    - Suggested search queries for next round (gap→search closed loop)
-    - Outline evolution suggestions (drives outline restructuring)
-
-    Call this after each round of searching and outline updating.
-    """
-    workspace = _get_workspace_path(runtime)
-
-    outline_path = workspace / "outline.md"
-    if not outline_path.exists():
-        return "No outline found. Create an outline first using outline_update."
-    outline = outline_path.read_text(encoding="utf-8")
-
-    with _mb_lock:
-        mb = _load_memory_bank(workspace)
-        mb["research_iterations"] = mb.get("research_iterations", 0) + 1
-        _save_memory_bank(workspace, mb)
-
-    research_iterations = mb["research_iterations"]
-    total_sources = len(mb["page_info"])
-
-    user_query = _extract_user_query(runtime)
-
-    # Hard limit: prevent infinite loops
-    if research_iterations >= 15:
-        return (
-            "## Research Reflection\n\n"
-            f"**Sources**: {total_sources} | **Iterations**: {research_iterations}\n\n"
-            "**⚠️ Hard limit reached (max 15 iterations).** Proceed to writing with current research."
-        )
-
-    # Hard gates (minimum thresholds)
-    hard_gates_met = research_iterations >= 3 and total_sources >= 10
-
-    # LLM Reflection
-    reflection_result = None
-    try:
-        from deerflow.models import create_chat_model
-
-        summaries = "\n".join(
-            f"- [id_{p['id']}] {p.get('summary', 'No summary')}"
-            for p in mb["page_info"]
-        )
-        prompt = REFLECTION_PROMPT.format(
-            user_query=user_query,
-            outline=outline,
-            summaries=summaries or "(no sources collected yet)",
-            iteration=research_iterations,
-            total_sources=total_sources,
-        )
-        model = create_chat_model(thinking_enabled=False)
-        response = model.invoke(prompt)
-        response_text = str(response.content).strip()
-        reflection_result = _extract_json(response_text)
-    except Exception:
-        reflection_result = None
-
-    # Extract fields
-    if reflection_result:
-        llm_says_complete = reflection_result.get("research_complete", False)
-        section_gaps = reflection_result.get("section_gaps", {})
-        priority_section = reflection_result.get("priority_section", "")
-        knowledge_gap = reflection_result.get("knowledge_gap", "")
-        suggested_queries = reflection_result.get("suggested_queries", [])
-        outline_evolution = reflection_result.get("outline_evolution", "")
-        reasoning = reflection_result.get("reasoning", "")
-    else:
-        llm_says_complete = False
-        section_gaps = {}
-        priority_section = ""
-        knowledge_gap = ""
-        suggested_queries = []
-        outline_evolution = ""
-        reasoning = ""
-
-    # Hard gate override: even if LLM says complete, must meet minimum thresholds
-    research_complete = llm_says_complete and hard_gates_met
-
-    # Build reflection report
-    report_lines = [
-        "## Research Reflection",
-        "",
-        f"**Sources**: {total_sources} | **Iteration**: {research_iterations}",
-        "",
-    ]
-
-    if reflection_result:
-        if section_gaps:
-            report_lines.append("**Semantic gaps identified:**")
-            for section, gap in section_gaps.items():
-                report_lines.append(f"- **{section}**: {gap}")
-            report_lines.append("")
-
-        if priority_section:
-            report_lines.append(f"**Priority focus**: {priority_section}")
-        if knowledge_gap:
-            report_lines.append(f"**Key knowledge gap**: {knowledge_gap}")
-        if reasoning:
-            report_lines.append(f"**Assessment**: {reasoning}")
-        report_lines.append("")
-
-        if outline_evolution and outline_evolution.lower() != "no changes needed":
-            report_lines.append(f"**Outline evolution**: {outline_evolution}")
-            report_lines.append("")
-
-        if suggested_queries and not research_complete:
-            report_lines.append("**Suggested queries for next round:**")
-            for q in suggested_queries[:3]:
-                report_lines.append(f"- `{q}`")
-            report_lines.append("")
-    else:
-        report_lines.append("*(LLM reflection unavailable — using conservative fallback)*")
-        report_lines.append("")
-
-    # Recommendation
-    if research_complete:
-        report_lines.append(
-            "✅ **Research is comprehensive.** Proceed to writing phase."
-        )
-    elif not hard_gates_met:
-        blockers = []
-        if research_iterations < 3:
-            blockers.append(f"iterations {research_iterations}/3")
-        if total_sources < 10:
-            blockers.append(f"sources {total_sources}/10")
-        report_lines.append(
-            f"⛔ DO NOT PROCEED TO WRITING. Unmet: {', '.join(blockers)}."
-        )
-        if suggested_queries:
-            report_lines.append("Use the suggested queries above for your next search round.")
-    else:
-        report_lines.append(
-            "⚠️ Minimum thresholds met but research gaps remain. "
-            "Continue researching to fill the gaps identified above."
-        )
-        if suggested_queries:
-            report_lines.append("Use the suggested queries above for your next search round.")
-
-    return "\n".join(report_lines)
 
 
 @tool("check_query_duplicate", parse_docstring=True)
@@ -480,7 +230,9 @@ def check_query_duplicate_tool(
             if ratio >= 0.85:
                 return (
                     f"DUPLICATE: '{query}' is {ratio:.0%} similar to previously "
-                    f"executed query '{executed}'. Try a different angle."
+                    f"executed query '{executed}'. Try a different angle or more specific terms.\n"
+                    "NOTE: This is a deduplication check ONLY. Do NOT interpret this as a signal to "
+                    "stop researching. Reformulate the query with more specific terms and continue."
                 )
 
         mb.setdefault("executed_queries", []).append(query)

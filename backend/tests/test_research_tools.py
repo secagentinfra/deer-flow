@@ -1,9 +1,8 @@
-"""Tests for Deep Research v2 research tools (Phase 2.6: LLM Reflection + coverage refactor)."""
+"""Tests for Deep Research v2 research tools (Phase 2.7: Reflection Subagent)."""
 
 import importlib
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -104,70 +103,6 @@ class TestParseOutline:
 
 
 # ---------------------------------------------------------------------------
-# _extract_json
-# ---------------------------------------------------------------------------
-
-
-class TestExtractJson:
-    def test_bare_json(self):
-        text = '{"research_complete": true, "section_gaps": {}}'
-        result = research_tools._extract_json(text)
-        assert result == {"research_complete": True, "section_gaps": {}}
-
-    def test_json_in_code_fence(self):
-        text = '```json\n{"research_complete": false}\n```'
-        result = research_tools._extract_json(text)
-        assert result == {"research_complete": False}
-
-    def test_json_in_answer_tags(self):
-        text = '<answer>{"research_complete": true}</answer>'
-        result = research_tools._extract_json(text)
-        assert result == {"research_complete": True}
-
-    def test_json_with_surrounding_text(self):
-        text = 'Here is my analysis:\n{"research_complete": false, "reasoning": "gaps remain"}\nEnd.'
-        result = research_tools._extract_json(text)
-        assert result is not None
-        assert result["research_complete"] is False
-
-    def test_invalid_content_returns_none(self):
-        assert research_tools._extract_json("This is not JSON at all") is None
-
-    def test_empty_string_returns_none(self):
-        assert research_tools._extract_json("") is None
-
-
-# ---------------------------------------------------------------------------
-# _extract_user_query
-# ---------------------------------------------------------------------------
-
-
-class TestExtractUserQuery:
-    def test_extracts_human_message(self):
-        msg = SimpleNamespace(type="human", content="Research quantum computing trends")
-        rt = SimpleNamespace(state={"messages": [msg]})
-        assert research_tools._extract_user_query(rt) == "Research quantum computing trends"
-
-    def test_truncates_long_query(self):
-        msg = SimpleNamespace(type="human", content="x" * 600)
-        rt = SimpleNamespace(state={"messages": [msg]})
-        result = research_tools._extract_user_query(rt)
-        assert len(result) == 500
-
-    def test_returns_fallback_when_no_messages(self):
-        rt = SimpleNamespace(state={})
-        assert "unknown" in research_tools._extract_user_query(rt)
-
-    def test_returns_fallback_when_no_human_message(self):
-        msg = SimpleNamespace(type="ai", content="Hello")
-        rt = SimpleNamespace(state={"messages": [msg]})
-        assert "unknown" in research_tools._extract_user_query(rt)
-
-    def test_returns_fallback_when_none(self):
-        assert "unknown" in research_tools._extract_user_query(None)
-
-
-# ---------------------------------------------------------------------------
 # evidence_store_tool
 # ---------------------------------------------------------------------------
 
@@ -227,6 +162,20 @@ class TestEvidenceStore:
         ids = [p["id"] for p in mb["page_info"]]
         assert ids == [1, 2, 3]
 
+    def test_evidence_bank_does_not_contain_research_iterations(self, tmp_path):
+        """Phase 2.7: research_iterations no longer stored in evidence_bank.json."""
+        rt = _make_runtime(str(tmp_path))
+        research_tools.evidence_store_tool.func(
+            runtime=rt,
+            url="https://example.com/x",
+            summary="s",
+            evidence="e",
+            goal="g",
+        )
+        mb = json.loads((tmp_path / "evidence_bank.json").read_text())
+        assert "research_iterations" not in mb
+        assert "reflection_history" not in mb
+
 
 # ---------------------------------------------------------------------------
 # evidence_retrieve_tool
@@ -269,7 +218,7 @@ class TestEvidenceRetrieve:
 
 
 # ---------------------------------------------------------------------------
-# outline_update_tool (Phase 2.6: [sources: ...] format, no coverage %, no iteration count)
+# outline_update_tool
 # ---------------------------------------------------------------------------
 
 
@@ -324,7 +273,8 @@ class TestOutlineUpdate:
         research_tools.outline_update_tool.func(runtime=rt, outline_content=content)
         assert (tmp_path / "outline.md").read_text() == content
 
-    def test_reminder_uses_sources_format(self, tmp_path):
+    def test_reminder_references_reflection_task(self, tmp_path):
+        """Phase 2.7: reminder must reference task(subagent_type='reflection') not research_reflect."""
         rt = _make_runtime(str(tmp_path))
         result = research_tools.outline_update_tool.func(
             runtime=rt, outline_content="### Section 1\n",
@@ -332,7 +282,8 @@ class TestOutlineUpdate:
         assert "REMINDER" in result
         assert "[sources: 1, 2]" in result
         assert "<citation>" not in result
-        assert "research_reflect" in result
+        assert "research_reflect" not in result
+        assert "task(subagent_type='reflection')" in result
 
 
 class TestOutlineUpdateCitationValidation:
@@ -371,7 +322,7 @@ class TestOutlineUpdateCitationValidation:
 
 
 # ---------------------------------------------------------------------------
-# evidence_store + evidence_retrieve reminders (Phase 2.6 updates)
+# evidence_store + evidence_retrieve reminders (Phase 2.7 updates)
 # ---------------------------------------------------------------------------
 
 
@@ -387,24 +338,10 @@ class TestEvidenceStoreReminder:
         )
         assert "REMINDER" in result
         assert "update outline" in result
-        assert "research_reflect" in result
-        assert "Research iterations: 0" in result
+        assert "task(subagent_type='reflection')" in result
         assert "Total sources: 1" in result
-
-    def test_reminder_shows_research_iteration_count(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        research_tools._save_memory_bank(
-            tmp_path,
-            {"page_info": [], "url2id": {}, "executed_queries": [], "research_iterations": 5},
-        )
-        result = research_tools.evidence_store_tool.func(
-            runtime=rt,
-            url="https://example.com/r2",
-            summary="More data.",
-            evidence="Details.",
-            goal="test",
-        )
-        assert "Research iterations: 5" in result
+        assert "research_reflect" not in result
+        assert "Research iterations" not in result
 
 
 class TestEvidenceRetrieveReminder:
@@ -426,258 +363,7 @@ class TestEvidenceRetrieveReminder:
 
 
 # ---------------------------------------------------------------------------
-# research_reflect_tool (Phase 2.6: LLM Reflection)
-# ---------------------------------------------------------------------------
-
-
-def _make_llm_response(content: dict) -> MagicMock:
-    """Create a mock LLM response with JSON content."""
-    mock_response = MagicMock()
-    mock_response.content = json.dumps(content)
-    return mock_response
-
-
-def _seed_mb(tmp_path, *, sources=12, research_iterations=4):
-    """Create a memory bank with the given number of sources and iterations."""
-    research_tools._save_memory_bank(
-        tmp_path,
-        {
-            "page_info": [
-                {"id": i, "url": f"u{i}", "summary": f"Summary {i}", "evidence": f"Evidence {i}", "goal": "g", "status": "ok"}
-                for i in range(1, sources + 1)
-            ],
-            "url2id": {f"u{i}": i for i in range(1, sources + 1)},
-            "executed_queries": [f"q{i}" for i in range(sources)],
-            "research_iterations": research_iterations,
-        },
-    )
-
-
-class TestResearchReflect:
-    def test_no_outline_returns_instruction(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "No outline found" in result
-
-    def test_increments_research_iterations(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n")
-        research_tools._save_memory_bank(
-            tmp_path, {"page_info": [], "url2id": {}, "executed_queries": []}
-        )
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            research_tools.research_reflect_tool.func(runtime=rt)
-        mb = json.loads((tmp_path / "evidence_bank.json").read_text())
-        assert mb["research_iterations"] == 1
-
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            research_tools.research_reflect_tool.func(runtime=rt)
-        mb = json.loads((tmp_path / "evidence_bank.json").read_text())
-        assert mb["research_iterations"] == 2
-
-    def test_no_coverage_percentage_in_output(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n### 1.2 B\n")
-        _seed_mb(tmp_path, sources=2, research_iterations=0)
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "Coverage:" not in result
-        assert "%" not in result
-
-
-class TestResearchReflectLLM:
-    @patch("deerflow.models.create_chat_model")
-    def test_llm_complete_with_hard_gates_met(self, mock_create, tmp_path):
-        mock_model = MagicMock()
-        mock_model.invoke.return_value = _make_llm_response({
-            "research_complete": True,
-            "section_gaps": {},
-            "priority_section": "",
-            "knowledge_gap": "",
-            "suggested_queries": [],
-            "outline_evolution": "No changes needed",
-            "reasoning": "All 5 dimensions scored above 90%.",
-        })
-        mock_create.return_value = mock_model
-
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n")
-        _seed_mb(tmp_path, sources=12, research_iterations=2)
-
-        result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "Proceed to writing" in result
-        assert "⛔" not in result
-
-    @patch("deerflow.models.create_chat_model")
-    def test_llm_complete_but_hard_gates_unmet(self, mock_create, tmp_path):
-        """LLM says complete but iterations < 3 → still blocked."""
-        mock_model = MagicMock()
-        mock_model.invoke.return_value = _make_llm_response({
-            "research_complete": True,
-            "section_gaps": {},
-            "priority_section": "",
-            "knowledge_gap": "",
-            "suggested_queries": [],
-            "outline_evolution": "No changes needed",
-            "reasoning": "Looks good.",
-        })
-        mock_create.return_value = mock_model
-
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n")
-        _seed_mb(tmp_path, sources=5, research_iterations=0)
-
-        result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "⛔ DO NOT PROCEED TO WRITING" in result
-
-    @patch("deerflow.models.create_chat_model")
-    def test_llm_not_complete_with_suggestions(self, mock_create, tmp_path):
-        mock_model = MagicMock()
-        mock_model.invoke.return_value = _make_llm_response({
-            "research_complete": False,
-            "section_gaps": {"Performance": "No benchmark data"},
-            "priority_section": "Performance",
-            "knowledge_gap": "Missing latency and throughput metrics",
-            "suggested_queries": [
-                "system X benchmark latency throughput 2025",
-                "system X vs Y performance comparison",
-            ],
-            "outline_evolution": "Add subsection ### 3.3 Performance Benchmarks",
-            "reasoning": "Core mechanisms well covered but empirical data dimension at 40%.",
-        })
-        mock_create.return_value = mock_model
-
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n")
-        _seed_mb(tmp_path, sources=12, research_iterations=2)
-
-        result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "Suggested queries" in result
-        assert "benchmark" in result.lower()
-        assert "Outline evolution" in result
-        assert "Performance Benchmarks" in result
-        assert "Semantic gaps" in result
-        assert "Priority focus" in result
-
-    @patch("deerflow.models.create_chat_model")
-    def test_llm_not_complete_no_outline_evolution(self, mock_create, tmp_path):
-        """outline_evolution = 'No changes needed' should not appear in output."""
-        mock_model = MagicMock()
-        mock_model.invoke.return_value = _make_llm_response({
-            "research_complete": False,
-            "section_gaps": {"Limits": "Missing"},
-            "priority_section": "Limits",
-            "knowledge_gap": "No failure modes",
-            "suggested_queries": ["system X failure modes"],
-            "outline_evolution": "No changes needed",
-            "reasoning": "Gaps remain.",
-        })
-        mock_create.return_value = mock_model
-
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n")
-        _seed_mb(tmp_path, sources=12, research_iterations=2)
-
-        result = research_tools.research_reflect_tool.func(runtime=rt)
-        assert "Outline evolution" not in result
-
-    @patch("deerflow.models.create_chat_model")
-    def test_user_query_injected_into_prompt(self, mock_create, tmp_path):
-        mock_model = MagicMock()
-        mock_model.invoke.return_value = _make_llm_response({
-            "research_complete": False,
-            "section_gaps": {},
-            "priority_section": "",
-            "knowledge_gap": "",
-            "suggested_queries": [],
-            "outline_evolution": "",
-            "reasoning": "",
-        })
-        mock_create.return_value = mock_model
-
-        msg = SimpleNamespace(type="human", content="Research quantum computing trends 2026")
-        rt = _make_runtime(str(tmp_path), messages=[msg])
-        (tmp_path / "outline.md").write_text("### 1.1 A\n")
-        _seed_mb(tmp_path, sources=2, research_iterations=0)
-
-        research_tools.research_reflect_tool.func(runtime=rt)
-
-        call_args = mock_model.invoke.call_args
-        prompt_text = call_args[0][0]
-        assert "quantum computing" in prompt_text
-
-    def test_llm_failure_fallback(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n")
-        _seed_mb(tmp_path, sources=2, research_iterations=0)
-
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("LLM unavailable")):
-            result = research_tools.research_reflect_tool.func(runtime=rt)
-
-        assert "conservative fallback" in result
-        assert "⛔" in result
-
-    def test_llm_failure_never_says_complete(self, tmp_path):
-        """Even with hard gates met, LLM failure → conservative (not complete)."""
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n[sources: 1]\n")
-        _seed_mb(tmp_path, sources=12, research_iterations=2)
-
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("fail")):
-            result = research_tools.research_reflect_tool.func(runtime=rt)
-
-        assert "Proceed to writing" not in result
-        assert "conservative fallback" in result
-
-
-class TestResearchReflectHardLimit:
-    def test_15_iteration_hard_limit(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 Intro\n### 1.2 Body\n")
-        _seed_mb(tmp_path, sources=5, research_iterations=14)
-
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            result = research_tools.research_reflect_tool.func(runtime=rt)
-
-        assert "Hard limit reached" in result
-        assert "Proceed to writing" in result
-        assert "⛔" not in result
-
-    def test_no_hard_limit_at_14(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 Intro\n### 1.2 Body\n")
-        _seed_mb(tmp_path, sources=2, research_iterations=13)
-
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            result = research_tools.research_reflect_tool.func(runtime=rt)
-
-        assert "Hard limit" not in result
-
-
-class TestIterationCountInReflectNotOutline:
-    def test_outline_update_does_not_change_iterations(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        for i in range(3):
-            research_tools.outline_update_tool.func(
-                runtime=rt, outline_content=f"### Section {i}\n"
-            )
-        mb = json.loads((tmp_path / "evidence_bank.json").read_text())
-        assert mb.get("research_iterations", 0) == 0
-
-    def test_reflect_increments_iterations(self, tmp_path):
-        rt = _make_runtime(str(tmp_path))
-        (tmp_path / "outline.md").write_text("### 1.1 A\n")
-        research_tools._save_memory_bank(
-            tmp_path, {"page_info": [], "url2id": {}, "executed_queries": []}
-        )
-        with patch("deerflow.models.create_chat_model", side_effect=Exception("skip")):
-            research_tools.research_reflect_tool.func(runtime=rt)
-        mb = json.loads((tmp_path / "evidence_bank.json").read_text())
-        assert mb["research_iterations"] == 1
-
-
-# ---------------------------------------------------------------------------
-# check_query_duplicate_tool
+# check_query_duplicate_tool (Phase 2.7: M2 disambiguation)
 # ---------------------------------------------------------------------------
 
 
@@ -725,6 +411,95 @@ class TestCheckQueryDuplicate:
 
         mb = json.loads((tmp_path / "evidence_bank.json").read_text())
         assert len(mb["executed_queries"]) == 2
+
+    def test_duplicate_message_includes_disambiguation(self, tmp_path):
+        """Phase 2.7 M2: DUPLICATE message must clarify it's NOT a stop signal."""
+        rt = _make_runtime(str(tmp_path))
+        research_tools.check_query_duplicate_tool.func(
+            runtime=rt, query="machine learning material property prediction"
+        )
+        result = research_tools.check_query_duplicate_tool.func(
+            runtime=rt, query="machine learning material property prediction"
+        )
+        assert "DUPLICATE" in result
+        assert "deduplication check ONLY" in result
+        assert "Do NOT interpret" in result
+        assert "stop researching" in result
+
+    def test_non_duplicate_lacks_disambiguation(self, tmp_path):
+        """Non-duplicate queries must NOT contain the stop-signal disclaimer."""
+        rt = _make_runtime(str(tmp_path))
+        result = research_tools.check_query_duplicate_tool.func(
+            runtime=rt, query="some unique query about robots"
+        )
+        assert "deduplication check ONLY" not in result
+        assert "Do NOT interpret" not in result
+
+
+# ---------------------------------------------------------------------------
+# Reflection Subagent registration (Phase 2.7)
+# ---------------------------------------------------------------------------
+
+
+class TestReflectionSubagentRegistration:
+    def test_reflection_agent_config_has_correct_tools(self):
+        import importlib.util
+        import sys
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent
+        config_path = backend_dir / "packages/harness/deerflow/subagents/config.py"
+        agent_path = backend_dir / "packages/harness/deerflow/subagents/builtins/reflection_agent.py"
+
+        spec = importlib.util.spec_from_file_location("subagents_config", config_path)
+        config_mod = importlib.util.module_from_spec(spec)
+        sys.modules["deerflow.subagents.config"] = config_mod
+        spec.loader.exec_module(config_mod)
+
+        spec2 = importlib.util.spec_from_file_location("reflection_agent", agent_path)
+        refl_mod = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(refl_mod)
+
+        c = refl_mod.REFLECTION_AGENT_CONFIG
+        assert c.name == "reflection"
+        assert c.tools == ["read_file", "write_file", "ls"]
+        assert "task" in c.disallowed_tools
+        assert "ask_clarification" in c.disallowed_tools
+        assert "present_files" in c.disallowed_tools
+        assert c.max_turns == 15
+        assert c.timeout_seconds == 120
+        assert c.model == "inherit"
+
+    def test_reflection_agent_system_prompt_has_key_sections(self):
+        import importlib.util
+        import sys
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent
+        config_path = backend_dir / "packages/harness/deerflow/subagents/config.py"
+        agent_path = backend_dir / "packages/harness/deerflow/subagents/builtins/reflection_agent.py"
+
+        spec = importlib.util.spec_from_file_location("subagents_config_2", config_path)
+        config_mod = importlib.util.module_from_spec(spec)
+        sys.modules["deerflow.subagents.config"] = config_mod
+        spec.loader.exec_module(config_mod)
+
+        spec2 = importlib.util.spec_from_file_location("reflection_agent_2", agent_path)
+        refl_mod = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(refl_mod)
+
+        prompt = refl_mod.REFLECTION_SYSTEM_PROMPT
+        assert "research_state.json" in prompt
+        assert "research_iterations" in prompt
+        assert "research_complete" in prompt
+        assert "suggested_queries" in prompt
+        assert "outline_evolution" in prompt
+        assert "EVALUATION_FRAMEWORK" in prompt
+        assert "PROGRESSIVE_RESEARCH_STRATEGY" in prompt
+        assert "GAP_PRIORITIZATION" in prompt
+        assert "WORKFLOW" in prompt
+        assert "OUTPUT_FORMAT" in prompt
+        assert "CALIBRATION_EXAMPLES" in prompt
 
 
 # ---------------------------------------------------------------------------

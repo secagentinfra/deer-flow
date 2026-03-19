@@ -39,7 +39,7 @@ This skill implements a structured deep research methodology inspired by state-o
    ```
 3. This initial outline has NO source annotations — that's expected
 
-### Phase 1: Dynamic Research Loop (≥3 iterations)
+### Phase 1: Dynamic Research Loop
 
 **Stage 1 Rules: Information Collection**
 - Focus on COMPREHENSIVENESS: cover ALL key dimensions
@@ -47,32 +47,34 @@ This skill implements a structured deep research methodology inspired by state-o
 - Record key data points and causal relationships
 - Note surprising findings and contradictions
 
-**Each iteration (anchored by `research_reflect`):**
+**Each iteration:**
 
-1. **Reflect**: Call `research_reflect` — it returns:
-   - Semantic completeness assessment (LLM-driven, not programmatic coverage)
+1. **Reflect**: Call `task(subagent_type="reflection", prompt="Evaluate research completeness for: {user_query}")` — it returns a JSON message with:
+   - `research_iterations`: current iteration count (incremented by Subagent)
+   - `research_complete`: semantic completeness assessment
    - `suggested_queries`: targeted search queries for next round
    - `outline_evolution`: suggestions for outline restructuring
-   - Whether to continue researching or proceed to writing
-2. **Evolve outline**: If `outline_evolution` suggests changes (new sections, merges, splits),
+2. **Iteration limit check**: If `research_iterations >= 15` in the returned message, proceed to writing regardless of `research_complete`
+3. **Completion check**: If `research_complete` is true (and `research_iterations < 15`), proceed to writing phase
+4. **Evolve outline**: If `outline_evolution` suggests changes (new sections, merges, splits),
    call `outline_update` with the restructured outline
-3. **Search**: Use `suggested_queries` from reflection as primary search targets.
+5. **Search**: Use `suggested_queries` as primary search targets.
    Call `check_query_duplicate` for each, then `web_search` for non-duplicate queries
-4. **Select & Fetch**: Review search results, select top 2-3 most relevant URLs, call `web_fetch` for each
-5. **Extract & Store**: For each fetched page, call `evidence_store` with:
+6. **Select & Fetch**: Review search results, select top 2-3 most relevant URLs, call `web_fetch` for each
+7. **Extract & Store**: For each fetched page, call `evidence_store` with:
    - `summary`: 1-2 sentence summary of relevance
    - `evidence`: Detailed extracted quotes, data points, key findings
    - `goal`: The search goal this evidence relates to
-6. **Update outline sources**: Call `outline_update` to add `[sources: 1, 2]` annotations
+8. **Update outline sources**: Call `outline_update` to add `[sources: 1, 2]` annotations
    below subsections with new evidence:
    ```
    ### 2.1 Architecture Overview
    [sources: 4, 5, 6]
    ```
-7. **Loop**: Go back to step 1 (next `research_reflect` call = next iteration)
+9. **Loop**: Go back to step 1
 
 **CRITICAL REMINDERS for Phase 1:**
-- `research_reflect` is the cycle anchor — follow its `suggested_queries` and `outline_evolution` guidance
+- `task(subagent_type="reflection")` is the cycle anchor — follow its `suggested_queries` and `outline_evolution` guidance
 - Each subsection needs a `[sources: 1, 2]` line below it (NOT in the heading)
 - Do NOT use `<citation>` tags — they are deprecated
 - Do NOT invent your own search direction when `suggested_queries` is available
@@ -101,6 +103,8 @@ This skill implements a structured deep research methodology inspired by state-o
 - Each section should have ≥2 paragraphs of analysis
 - NO shallow enumeration without interpretation
 - NO statistics without context and analysis
+- Call `evidence_retrieve` for EACH section separately — do NOT batch all sources in one call
+- Write each section immediately after retrieving its evidence, before moving to the next
 
 ### Phase 3: Report Assembly
 
@@ -128,10 +132,9 @@ Always check `<current_date>` before forming search queries. Use appropriate tim
 
 ## Quality Gates
 
-Research readiness is assessed by `research_reflect` (LLM-driven semantic evaluation):
-1. ✅ LLM quantitative assessment: scores each of 5 dimensions (0-100%), requires average >90% and no critical <70%
-2. ✅ ≥3 research iterations completed (hard gate, counted by `research_reflect` calls)
-3. ✅ ≥10 unique sources in evidence bank (hard gate)
-4. ⛔ Safety cap: 15 iterations max
+Research readiness is assessed by the Reflection Subagent (invoked via `task(subagent_type="reflection")`):
+1. ✅ Semantic completeness: Subagent reads actual evidence and judges coverage across key dimensions
+2. ✅ `research_complete: true` returned in subagent message — proceed to writing
+3. ⛔ Safety cap: if `research_iterations >= 15` in returned message, proceed to writing regardless
 
-NOTE: No programmatic coverage percentage. The LLM evaluator is the sole judge of research completeness.
+NOTE: No hard source count gate. The Reflection Subagent judges research sufficiency based on evidence density, not source count. It reads the full evidence bank and makes an informed assessment.

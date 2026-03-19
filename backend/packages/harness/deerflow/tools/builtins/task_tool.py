@@ -23,7 +23,7 @@ def task_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
     description: str,
     prompt: str,
-    subagent_type: Literal["general-purpose", "bash"],
+    subagent_type: Literal["general-purpose", "bash", "reflection"],
     tool_call_id: Annotated[str, InjectedToolCallId],
     max_turns: int | None = None,
 ) -> str:
@@ -40,6 +40,10 @@ def task_tool(
       multiple dependent steps, or would benefit from isolated context.
     - **bash**: Command execution specialist for running bash commands. Use for
       git operations, build processes, or when command output would be verbose.
+    - **reflection**: Research completeness evaluator. Reads workspace files
+      (outline.md, evidence_bank.json, research_state.json) and returns a JSON
+      assessment with research_iterations, research_complete, suggested_queries,
+      and outline_evolution. Use during Phase 1 research loop.
 
     When to use this tool:
     - Complex tasks requiring multiple steps or tools
@@ -60,7 +64,7 @@ def task_tool(
     # Get subagent configuration
     config = get_subagent_config(subagent_type)
     if config is None:
-        return f"Error: Unknown subagent type '{subagent_type}'. Available: general-purpose, bash"
+        return f"Error: Unknown subagent type '{subagent_type}'. Available: general-purpose, bash, reflection"
 
     # Build config overrides
     overrides: dict = {}

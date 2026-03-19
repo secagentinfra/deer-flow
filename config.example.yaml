@@ -237,10 +237,6 @@ tools:
     group: research
     use: deerflow.tools.builtins.research_tools:outline_update_tool
 
-  - name: research_reflect
-    group: research
-    use: deerflow.tools.builtins.research_tools:research_reflect_tool
-
   - name: check_query_duplicate
     group: research
     use: deerflow.tools.builtins.research_tools:check_query_duplicate_tool

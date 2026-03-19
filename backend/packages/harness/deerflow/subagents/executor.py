@@ -227,9 +227,12 @@ class SubagentExecutor:
             agent = self._create_agent()
             state = self._build_initial_state(task)
 
-            # Build config with thread_id for sandbox access and recursion limit
+            # Build config with thread_id for sandbox access and recursion limit.
+            # LangGraph counts graph node traversals, not LLM turns: each tool call
+            # round consumes 2 steps (call_model + tools), so we convert max_turns
+            # (intended as LLM call count) to the correct recursion_limit value.
             run_config: RunnableConfig = {
-                "recursion_limit": self.config.max_turns,
+                "recursion_limit": self.config.max_turns * 2 + 1,
             }
             context = {}
             if self.thread_id:
