@@ -1,7 +1,7 @@
 import logging
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents.middleware import ModelRetryMiddleware, SummarizationMiddleware
 from langchain_core.runnables import RunnableConfig
 
 from deerflow.agents.lead_agent.prompt import apply_prompt_template
@@ -215,6 +215,9 @@ def _build_middlewares(config: RunnableConfig, model_name: str | None, agent_nam
         List of middleware instances.
     """
     middlewares = build_lead_runtime_middlewares(lazy_init=True)
+
+    # Model call retry with exponential backoff for transient API errors (e.g. httpx.ReadTimeout)
+    middlewares.append(ModelRetryMiddleware(max_retries=2, on_failure="continue"))
 
     # Add summarization middleware if enabled
     summarization_middleware = _create_summarization_middleware()
