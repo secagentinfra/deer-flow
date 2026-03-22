@@ -126,9 +126,13 @@ This skill implements a structured deep research methodology inspired by state-o
 Always check `<current_date>` before forming search queries. Use appropriate time precision.
 
 ### Scaling (Self-Balancing)
-- Simple query: 5-10 searches, 1-2 research iterations
-- Medium query: 10-20 searches, 2-3 research iterations
-- Complex query: 20+ searches, 3+ research iterations
+Search breadth scales with query complexity:
+- Simple query: ~5-10 targeted searches
+- Medium query: ~10-20 searches across multiple angles
+- Complex query: 20+ searches with systematic coverage
+
+The number of research iterations is determined by the Reflection Subagent
+based on actual evidence quality. Do not set your own iteration target.
 
 ## Quality Gates
 
