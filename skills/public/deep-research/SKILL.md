@@ -54,10 +54,13 @@ This skill implements a structured deep research methodology inspired by state-o
    - `research_complete`: semantic completeness assessment
    - `suggested_queries`: targeted search queries for next round
    - `outline_evolution`: suggestions for outline restructuring
-2. **Iteration limit check**: If `research_iterations >= 15` in the returned message, proceed to writing regardless of `research_complete`
-3. **Completion check**: If `research_complete` is true (and `research_iterations < 15`), proceed to writing phase
+2. **Iteration limit check**: If `research_iterations >= 15` in the returned message, proceed to Phase Transition regardless of `research_complete`
+3. **Completion check**: If `research_complete` is true (and `research_iterations < 15`), proceed to Phase Transition
 4. **Evolve outline**: If `outline_evolution` suggests changes (new sections, merges, splits),
-   call `outline_update` with the restructured outline
+   read current `outline.md`, restructure it, and call `outline_update`.
+   Preserve existing `[sources: ...]` annotations: when merging sections, union their IDs;
+   when splitting, assign each ID to the most relevant new subsection.
+   New sections start without sources (filled in step 8)
 5. **Search**: Use `suggested_queries` as primary search targets.
    Call `check_query_duplicate` for each, then `web_search` for non-duplicate queries
 6. **Select & Fetch**: Review search results, select top 2-3 most relevant URLs, call `web_fetch` for each
@@ -81,6 +84,19 @@ This skill implements a structured deep research methodology inspired by state-o
 - If `outline_evolution` suggests new sections or restructuring, update the outline FIRST
 - Fetch FULL content for promising results, don't rely on snippets
 - After storing evidence, ALWAYS update the outline with new source IDs
+
+### Phase Transition: Research to Writing
+
+After the reflection subagent returns `research_complete: true`
+(or `research_iterations >= 15` forced cap):
+
+1. Call `compact_context(reason="Research phase complete. Transitioning to writing.")`
+2. After compression, your context will contain:
+   - A structured summary of the research phase
+   - Writing instructions with paths to outline and evidence bank
+3. Proceed directly to Phase 2 (Hierarchical Writing)
+   - Do NOT call web_search or web_fetch in Phase 2
+   - Use evidence_retrieve to access stored evidence
 
 ### Phase 2: Hierarchical Writing
 
