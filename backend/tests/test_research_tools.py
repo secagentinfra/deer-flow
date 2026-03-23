@@ -113,23 +113,26 @@ class TestEvidenceStore:
         result = research_tools.evidence_store_tool.func(
             runtime=rt,
             url="https://example.com/page1",
+            title="AI Diagnosis Accuracy Study",
             summary="Relevant AI paper.",
             evidence="Key finding: AI improves diagnosis accuracy by 30%.",
             goal="AI healthcare applications",
         )
-        assert "id_1" in result
+        assert "source 1" in result
         assert "Total sources: 1" in result
 
         mb = json.loads((tmp_path / "evidence_bank.json").read_text())
         assert mb["url2id"]["https://example.com/page1"] == 1
         assert len(mb["page_info"]) == 1
         assert mb["page_info"][0]["summary"] == "Relevant AI paper."
+        assert mb["page_info"][0]["title"] == "AI Diagnosis Accuracy Study"
 
     def test_rejects_duplicate_url(self, tmp_path):
         rt = _make_runtime(str(tmp_path))
         research_tools.evidence_store_tool.func(
             runtime=rt,
             url="https://example.com/dup",
+            title="First Page",
             summary="First entry.",
             evidence="Evidence A.",
             goal="Goal A",
@@ -137,12 +140,13 @@ class TestEvidenceStore:
         result = research_tools.evidence_store_tool.func(
             runtime=rt,
             url="https://example.com/dup",
+            title="Duplicate Page",
             summary="Duplicate entry.",
             evidence="Evidence B.",
             goal="Goal B",
         )
         assert "already stored" in result
-        assert "id_1" in result
+        assert "source 1" in result
 
         mb = json.loads((tmp_path / "evidence_bank.json").read_text())
         assert len(mb["page_info"]) == 1
@@ -153,6 +157,7 @@ class TestEvidenceStore:
             research_tools.evidence_store_tool.func(
                 runtime=rt,
                 url=f"https://example.com/page{i}",
+                title=f"Page {i}",
                 summary=f"Summary {i}",
                 evidence=f"Evidence {i}",
                 goal="test",
@@ -168,6 +173,7 @@ class TestEvidenceStore:
         research_tools.evidence_store_tool.func(
             runtime=rt,
             url="https://example.com/x",
+            title="Test Page",
             summary="s",
             evidence="e",
             goal="g",
@@ -189,6 +195,7 @@ class TestEvidenceRetrieve:
             research_tools.evidence_store_tool.func(
                 runtime=rt,
                 url=f"https://example.com/src{i}",
+                title=f"Source Page {i}",
                 summary=f"Summary for source {i}",
                 evidence=f"Detailed evidence for source {i}",
                 goal="test goal",
@@ -202,6 +209,8 @@ class TestEvidenceRetrieve:
         assert '<source id="3">' in result
         assert "Detailed evidence for source 0" in result
         assert "Detailed evidence for source 2" in result
+        assert "Title: Source Page 0" in result
+        assert "Title: Source Page 2" in result
 
     def test_returns_friendly_message_for_missing_ids(self, tmp_path):
         self._seed_bank(str(tmp_path))
@@ -290,7 +299,7 @@ class TestOutlineUpdateCitationValidation:
     def test_detects_invalid_citation_ids(self, tmp_path):
         rt = _make_runtime(str(tmp_path))
         research_tools.evidence_store_tool.func(
-            runtime=rt, url="https://ex.com/1", summary="s", evidence="e", goal="g",
+            runtime=rt, url="https://ex.com/1", title="t", summary="s", evidence="e", goal="g",
         )
         outline = (
             "### 1.1 Background\n"
@@ -307,7 +316,7 @@ class TestOutlineUpdateCitationValidation:
         rt = _make_runtime(str(tmp_path))
         for i in range(3):
             research_tools.evidence_store_tool.func(
-                runtime=rt, url=f"https://ex.com/{i}", summary="s", evidence="e", goal="g",
+                runtime=rt, url=f"https://ex.com/{i}", title="t", summary="s", evidence="e", goal="g",
             )
         outline = (
             "### 1.1 Intro\n"
@@ -332,6 +341,7 @@ class TestEvidenceStoreReminder:
         result = research_tools.evidence_store_tool.func(
             runtime=rt,
             url="https://example.com/r1",
+            title="Test Source Page",
             summary="Test source.",
             evidence="Evidence data.",
             goal="test",
@@ -348,12 +358,13 @@ class TestEvidenceRetrieveReminder:
     def test_return_contains_citation_format_reminder(self, tmp_path):
         rt = _make_runtime(str(tmp_path))
         research_tools.evidence_store_tool.func(
-            runtime=rt, url="https://ex.com/1", summary="s", evidence="e", goal="g",
+            runtime=rt, url="https://ex.com/1", title="Example Page", summary="s", evidence="e", goal="g",
         )
         result = research_tools.evidence_retrieve_tool.func(runtime=rt, ids="1")
-        assert "[id_X]" in result
+        assert "[citation:" in result
         assert "[sources: ...]" in result
         assert "outline-only" in result
+        assert "Title: Example Page" in result
 
     def test_no_reminder_when_no_results(self, tmp_path):
         rt = _make_runtime(str(tmp_path))

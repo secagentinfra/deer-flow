@@ -74,6 +74,7 @@ def _parse_outline(outline: str) -> dict[str, list[int]]:
 def evidence_store_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
     url: str,
+    title: str,
     summary: str,
     evidence: str,
     goal: str,
@@ -85,6 +86,7 @@ def evidence_store_tool(
 
     Args:
         url: The source URL.
+        title: The page title (from web_search results or web_fetch).
         summary: A short 1-2 sentence summary of the page's relevance.
         evidence: Detailed extracted evidence (key quotes, data points, analysis).
         goal: The search goal this evidence relates to.
@@ -95,13 +97,14 @@ def evidence_store_tool(
 
         if url in mb["url2id"]:
             existing_id = mb["url2id"][url]
-            return f"URL already stored as id_{existing_id}. No duplicate stored."
+            return f"URL already stored as source {existing_id}. No duplicate stored."
 
         new_id = len(mb["url2id"]) + 1
         mb["url2id"][url] = new_id
         mb["page_info"].append({
             "id": new_id,
             "url": url,
+            "title": title,
             "goal": goal,
             "summary": summary,
             "evidence": evidence,
@@ -110,7 +113,7 @@ def evidence_store_tool(
         _save_memory_bank(workspace, mb)
         total_sources = len(mb["page_info"])
     return (
-        f"Stored as id_{new_id}. Total sources: {total_sources}. "
+        f"Stored as source {new_id}. Total sources: {total_sources}. "
         f"Summary: {summary}\n"
         "REMINDER: Next steps — update outline with this source ID, "
         "then call task(subagent_type='reflection') to assess progress."
@@ -140,7 +143,7 @@ def evidence_retrieve_tool(
             info = next((p for p in mb["page_info"] if p["url"] == url), None)
             if info:
                 results.append(
-                    f'<source id="{cid}">\nURL: {url}\nEvidence:\n{info["evidence"]}\n</source>'
+                    f'<source id="{cid}">\nTitle: {info["title"]}\nURL: {url}\nEvidence:\n{info["evidence"]}\n</source>'
                 )
 
     if not results:
@@ -148,7 +151,9 @@ def evidence_retrieve_tool(
     body = "\n\n".join(results)
     return (
         f"{body}\n\n"
-        "REMINDER: Use inline [id_X] or [id_X, id_Y] format for citations in the report. "
+        "REMINDER: Cite sources using [citation:Title](URL) format in the report. "
+        "Use the Title and URL from each <source> block above. "
+        "Example: [citation:AI Diagnosis Accuracy](https://example.com/page1). "
         "Do NOT include [sources: ...] lines in the report — those are outline-only markers."
     )
 
@@ -204,7 +209,7 @@ def outline_update_tool(
         f"Total sources in evidence bank: {total_sources}.{id_warning}\n"
         "REMINDER:\n"
         "- Each subsection needs a [sources: 1, 2] line below it (outline tracking ONLY)\n"
-        "- In writing phase: use inline [id_X] format, call evidence_retrieve BEFORE each section\n"
+        "- In writing phase: cite with [citation:Title](URL) format, call evidence_retrieve BEFORE each section\n"
         "- Call task(subagent_type='reflection') to assess completeness and get next search suggestions."
     )
 

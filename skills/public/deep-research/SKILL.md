@@ -110,11 +110,11 @@ After the reflection subagent returns `research_complete: true`
 
 1. **Read sources**: Look at the `[sources: X, Y]` line below the section heading
 2. **Retrieve evidence**: Call `evidence_retrieve` with those source IDs
-3. **Write section**: Analyze the evidence and write the section content with inline citations `[id_X]`
+3. **Write section**: Analyze the evidence and write the section content with inline citations `[citation:Title](URL)` — use the Title and URL from each `<source>` block returned by `evidence_retrieve`
 4. **Move to next section**: Repeat for all sections
 
 **CRITICAL REMINDERS for Phase 2:**
-- Cite EVERY factual statement: `According to [id_X], ...` or `... [id_X, id_Y]`
+- Cite EVERY factual statement: `[citation:Title](URL)` — Title and URL come from the `<source>` block
 - Analyze WHY findings matter, don't just enumerate
 - Each section should have ≥2 paragraphs of analysis
 - NO shallow enumeration without interpretation
@@ -126,7 +126,7 @@ After the reflection subagent returns `research_complete: true`
 
 1. Combine all sections into a single report
 2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
-3. Generate References list from evidence bank: `[id_X] Title - URL`
+3. Generate a Sources section listing all cited sources: `- [Title](URL) - brief description`
 4. Save as `research_{topic}_{YYYYMMDD}.md` in `/mnt/user-data/outputs/`
 5. Call `present_file` to deliver the report
 
