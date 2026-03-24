@@ -168,8 +168,7 @@ class TestCompactContextToolSuccess:
         kickoff_msg = result.update["messages"][2]  # summary, kickoff, tool
         assert isinstance(kickoff_msg, HumanMessage)
         assert "outline.md" in kickoff_msg.content
-        assert "evidence_bank.json" in kickoff_msg.content
-        assert "research_state.json" in kickoff_msg.content
+        assert "evidence_retrieve" in kickoff_msg.content
 
     @patch("deerflow.tools.builtins.compact_context_tool.create_chat_model")
     @patch(
@@ -257,3 +256,60 @@ class TestCompactContextToolDegradedPath:
         assert len(remove_msgs) == 0
         tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
         assert len(tool_msgs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Writing Protocol in kickoff
+# ---------------------------------------------------------------------------
+
+
+class TestKickoffWritingProtocol:
+    """Verify the WRITER_KICKOFF_TEMPLATE contains the Writing Protocol (Phase 3)."""
+
+    def _get_kickoff(self, tmp_path) -> str:
+        """Helper: run the tool and return kickoff message content."""
+        with (
+            patch(
+                "deerflow.tools.builtins.compact_context_tool.create_chat_model"
+            ) as mock_create_model,
+            patch(
+                "deerflow.tools.builtins.compact_context_tool.SummarizationMiddleware"
+            ) as mock_sm_class,
+        ):
+            mock_create_model.return_value = MagicMock()
+            mock_middleware = MagicMock()
+            mock_middleware._create_summary.return_value = "Research summary"
+            mock_sm_class.return_value = mock_middleware
+
+            runtime = _make_runtime(workspace_path=str(tmp_path))
+            result = _call_tool(runtime)
+
+        kickoff_msgs = [
+            m
+            for m in result.update["messages"]
+            if isinstance(m, HumanMessage) and "Writing Protocol" in m.content
+        ]
+        assert len(kickoff_msgs) == 1, "Expected exactly one kickoff HumanMessage with 'Writing Protocol'"
+        return kickoff_msgs[0].content
+
+    def test_kickoff_contains_writing_protocol(self, tmp_path):
+        kickoff = self._get_kickoff(tmp_path)
+
+        # Per-section workflow constraints (most critical behavioral fix)
+        assert "For EACH section" in kickoff
+        assert "one call per section" in kickoff
+        assert "do NOT batch" in kickoff
+
+        # Quality requirements
+        assert "≥2 paragraphs" in kickoff
+        assert "table" in kickoff.lower()
+
+        # Correct tool name
+        assert "present_files" in kickoff
+
+        # No dangling reference to lost SKILL.md
+        assert "as defined in your skill instructions" not in kickoff
+
+    def test_kickoff_prohibits_web_search(self, tmp_path):
+        kickoff = self._get_kickoff(tmp_path)
+        assert "Do NOT call `web_search`" in kickoff or "Do NOT call web_search" in kickoff

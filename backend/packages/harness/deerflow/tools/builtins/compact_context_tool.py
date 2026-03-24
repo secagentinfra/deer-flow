@@ -42,16 +42,40 @@ Messages to summarize:
 WRITER_KICKOFF_TEMPLATE = """\
 ## Phase Transition: Research to Writing
 
-The research phase is complete. The conversation history above is a compressed
-summary of {research_iterations} research iterations with {total_sources} sources.
+You are now in the **Writing Phase** of the Deep Research methodology.
+The conversation history above is a compressed summary of {research_iterations}
+research iterations with {total_sources} sources.
 
 All evidence is persisted in the workspace:
 - **Outline**: `{outline_path}` (read this first)
 - **Evidence**: use `evidence_retrieve` with the source IDs listed in the outline
 
-**Your task now**: Write the research report following the outline structure.
-Do NOT search for more information. Do NOT call web_search or web_fetch.
-Proceed directly to Phase 2 (Hierarchical Writing) as defined in your skill instructions.
+### Writing Protocol
+
+**For EACH section in the outline, in order:**
+
+1. Read the `[sources: X, Y]` line below the section heading
+2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
+3. Write the section **immediately** after retrieving — do NOT retrieve multiple sections before writing.
+   Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
+4. Move to the next section and repeat
+
+**Quality requirements:**
+- Cite EVERY factual statement — no uncited claims
+- Each section: ≥2 paragraphs of analysis (not shallow enumeration)
+- Include ≥2 comparative or summary tables with post-table analysis
+- Analyze WHY findings matter, not just WHAT they are
+
+**Report assembly (after all sections are written):**
+1. Combine all sections into a single report
+2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
+3. Generate a Sources section: `- [Title](URL) - brief description`
+4. Save to `/mnt/user-data/outputs/`
+5. Call `present_files` to deliver the report
+
+**Prohibitions:**
+- Do NOT call `web_search` or `web_fetch`
+- Do NOT include `[sources: ...]` lines in the report — those are outline-only markers
 """
 
 

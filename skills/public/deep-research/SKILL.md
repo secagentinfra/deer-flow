@@ -41,12 +41,6 @@ This skill implements a structured deep research methodology inspired by state-o
 
 ### Phase 1: Dynamic Research Loop
 
-**Stage 1 Rules: Information Collection**
-- Focus on COMPREHENSIVENESS: cover ALL key dimensions
-- Use BULLET POINTS, not paragraphs
-- Record key data points and causal relationships
-- Note surprising findings and contradictions
-
 **Each iteration:**
 
 1. **Reflect**: Call `task(subagent_type="reflection", prompt="Evaluate research completeness for: {user_query}")` — it returns a JSON message with:
@@ -76,14 +70,14 @@ This skill implements a structured deep research methodology inspired by state-o
    ```
 9. **Loop**: Go back to step 1
 
-**CRITICAL REMINDERS for Phase 1:**
-- `task(subagent_type="reflection")` is the cycle anchor — follow its `suggested_queries` and `outline_evolution` guidance
+**Research loop constraints:**
+- Use BULLET POINTS for evidence, not paragraphs
+- Note surprising findings and contradictions
+- `task(subagent_type="reflection")` is the cycle anchor — do NOT invent your own search direction when `suggested_queries` is available
 - Each subsection needs a `[sources: 1, 2]` line below it (NOT in the heading)
 - Do NOT use `<citation>` tags — they are deprecated
-- Do NOT invent your own search direction when `suggested_queries` is available
 - If `outline_evolution` suggests new sections or restructuring, update the outline FIRST
 - Fetch FULL content for promising results, don't rely on snippets
-- After storing evidence, ALWAYS update the outline with new source IDs
 
 ### Phase Transition: Research to Writing
 
@@ -93,42 +87,34 @@ After the reflection subagent returns `research_complete: true`
 1. Call `compact_context(reason="Research phase complete. Transitioning to writing.")`
 2. After compression, your context will contain:
    - A structured summary of the research phase
-   - Writing instructions with paths to outline and evidence bank
-3. Proceed directly to Phase 2 (Hierarchical Writing)
-   - Do NOT call web_search or web_fetch in Phase 2
-   - Use evidence_retrieve to access stored evidence
+   - **The complete Writing Protocol** with step-by-step instructions
+3. Follow the Writing Protocol in the compressed context
+   - The compressed context is self-contained — do NOT re-read this skill file
+   - Do NOT call web_search or web_fetch
 
 ### Phase 2: Hierarchical Writing
 
-**Stage 2 Rules: Report Generation**
-- Focus on INSIGHTFULNESS: granular analysis, causal relationships
-- Focus on HELPFULNESS: fluent, coherent, logical structure
-- Every factual statement MUST have inline citation
-- Include ≥2 tables with post-table analysis
+**For EACH section in the outline, in order:**
 
-**For each section in the outline:**
+1. Read the `[sources: X, Y]` line below the section heading
+2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
+3. Write the section **immediately** after retrieving — do NOT retrieve multiple sections before writing.
+   Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
+4. Move to the next section and repeat
 
-1. **Read sources**: Look at the `[sources: X, Y]` line below the section heading
-2. **Retrieve evidence**: Call `evidence_retrieve` with those source IDs
-3. **Write section**: Analyze the evidence and write the section content with inline citations `[citation:Title](URL)` — use the Title and URL from each `<source>` block returned by `evidence_retrieve`
-4. **Move to next section**: Repeat for all sections
-
-**CRITICAL REMINDERS for Phase 2:**
-- Cite EVERY factual statement: `[citation:Title](URL)` — Title and URL come from the `<source>` block
-- Analyze WHY findings matter, don't just enumerate
-- Each section should have ≥2 paragraphs of analysis
-- NO shallow enumeration without interpretation
-- NO statistics without context and analysis
-- Call `evidence_retrieve` for EACH section separately — do NOT batch all sources in one call
-- Write each section immediately after retrieving its evidence, before moving to the next
+**Quality requirements:**
+- Cite EVERY factual statement — no uncited claims
+- Each section: ≥2 paragraphs of analysis (not shallow enumeration)
+- Include ≥2 comparative or summary tables with post-table analysis
+- Analyze WHY findings matter, not just WHAT they are
 
 ### Phase 3: Report Assembly
 
 1. Combine all sections into a single report
 2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
-3. Generate a Sources section listing all cited sources: `- [Title](URL) - brief description`
-4. Save as `research_{topic}_{YYYYMMDD}.md` in `/mnt/user-data/outputs/`
-5. Call `present_file` to deliver the report
+3. Generate a Sources section: `- [Title](URL) - brief description`
+4. Save to `/mnt/user-data/outputs/`
+5. Call `present_files` to deliver the report
 
 ## Search Strategy
 
