@@ -13,6 +13,7 @@ from langgraph.types import Command
 from langgraph.typing import ContextT
 
 from deerflow.agents.thread_state import ThreadState
+from deerflow.config.paths import VIRTUAL_PATH_PREFIX
 from deerflow.config.summarization_config import get_summarization_config
 from deerflow.models import create_chat_model
 
@@ -46,8 +47,7 @@ summary of {research_iterations} research iterations with {total_sources} source
 
 All evidence is persisted in the workspace:
 - **Outline**: `{outline_path}` (read this first)
-- **Evidence bank**: `{evidence_path}` (use evidence_retrieve for each section)
-- **Research state**: `{research_state_path}` (iteration history, for reference only)
+- **Evidence**: use `evidence_retrieve` with the source IDs listed in the outline
 
 **Your task now**: Write the research report following the outline structure.
 Do NOT search for more information. Do NOT call web_search or web_fetch.
@@ -133,9 +133,7 @@ def compact_context_tool(
         kickoff_text = WRITER_KICKOFF_TEMPLATE.format(
             research_iterations=metadata["research_iterations"],
             total_sources=metadata["total_sources"],
-            outline_path=f"{workspace}/outline.md",
-            evidence_path=f"{workspace}/evidence_bank.json",
-            research_state_path=f"{workspace}/research_state.json",
+            outline_path=f"{VIRTUAL_PATH_PREFIX}/workspace/outline.md",
         )
 
         logger.info(
