@@ -241,6 +241,10 @@ tools:
     group: research
     use: deerflow.tools.builtins.research_tools:check_query_duplicate_tool
 
+  - name: report_validate
+    group: research
+    use: deerflow.tools.builtins.research_tools:report_validate_tool
+
   - name: compact_context
     group: research
     use: deerflow.tools.builtins.compact_context_tool:compact_context_tool

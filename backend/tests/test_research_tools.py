@@ -1,4 +1,4 @@
-"""Tests for Deep Research v2 research tools (Phase 2.7: Reflection Subagent)."""
+"""Tests for Deep Research v2 research tools (Phase 2.7 + Phase 4)."""
 
 import importlib
 import json
@@ -511,6 +511,378 @@ class TestReflectionSubagentRegistration:
         assert "WORKFLOW" in prompt
         assert "OUTPUT_FORMAT" in prompt
         assert "CALIBRATION_EXAMPLES" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _extract_heading_key (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractHeadingKey:
+    @pytest.mark.parametrize("heading,expected", [
+        ("### 2.1 Architecture Overview", "Architecture Overview"),
+        ("## Performance Analysis", "Performance Analysis"),
+        ("#### 3.1.2 Sub-topic", "Sub-topic"),
+        ("# Introduction", "Introduction"),
+        ("## 1. Background", "Background"),
+        ("### 1.1.1 Deep Dive", "Deep Dive"),
+    ])
+    def test_strips_prefix(self, heading, expected):
+        assert research_tools._extract_heading_key(heading) == expected
+
+
+# ---------------------------------------------------------------------------
+# _parse_report_sections (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestParseReportSections:
+    def test_empty_report(self):
+        assert research_tools._parse_report_sections("") == []
+
+    def test_single_section(self):
+        report = "## Introduction\nSome text here.\n"
+        sections = research_tools._parse_report_sections(report)
+        assert len(sections) == 1
+        assert sections[0][0] == "## Introduction"
+        assert "Some text here." in sections[0][1]
+
+    def test_multiple_sections(self):
+        report = (
+            "## Introduction\nIntro content.\n"
+            "## Background\nBackground content.\n"
+            "## Conclusion\nConclusion content.\n"
+        )
+        sections = research_tools._parse_report_sections(report)
+        assert len(sections) == 3
+        assert sections[0][0] == "## Introduction"
+        assert sections[1][0] == "## Background"
+        assert sections[2][0] == "## Conclusion"
+
+
+# ---------------------------------------------------------------------------
+# _is_content_section (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestIsContentSection:
+    @pytest.mark.parametrize("key,expected", [
+        ("Introduction", False),
+        ("Conclusion", False),
+        ("Sources", False),
+        ("References", False),
+        ("Architecture Overview", True),
+        ("Performance Analysis", True),
+        ("Key Findings", True),
+        ("Background and introduction to X", False),
+    ])
+    def test_classification(self, key, expected):
+        assert research_tools._is_content_section(key) == expected
+
+
+# ---------------------------------------------------------------------------
+# report_validate_tool (Phase 4)
+# ---------------------------------------------------------------------------
+
+VALID_REPORT = """\
+## Introduction
+
+This report covers the key findings about AI in healthcare, examining architecture,
+performance, adoption patterns, design decisions, and comparative outcomes across
+multiple deployment contexts.
+
+## 1. Background and Problem
+
+### 1.1 Background
+
+Healthcare AI systems have evolved significantly over the past decade.
+[citation:AI Study](https://ai.example.com)
+Modern deployments leverage large language models and specialized diagnostic networks
+to augment clinical decision-making at scale.
+
+### 1.2 Problem Statement
+
+The primary challenge is integrating AI predictions into existing clinical workflows
+without increasing cognitive load on practitioners. [citation:Benchmark Paper](https://bench.example.com)
+Interoperability with legacy electronic health record systems remains a key barrier.
+
+## 2. Architecture
+
+### 2.1 Architecture Overview
+
+The system uses transformer-based models with domain-specific pre-training.
+[citation:AI Study](https://ai.example.com)
+Key architecture decisions were driven by scalability needs and latency requirements.
+A microservices design ensures that individual components can be updated independently.
+
+### 2.2 Design Decisions
+
+Trade-offs between model accuracy and inference speed guided the architectural choices.
+[citation:Benchmark Paper](https://bench.example.com)
+Quantization and distillation techniques reduced model size by 40% with less than 2%
+accuracy loss, enabling deployment on edge hardware in resource-constrained settings.
+
+## 3. Performance
+
+### 3.1 Performance Analysis
+
+The model achieved 94% accuracy on standard benchmarks. [citation:Benchmark Paper](https://bench.example.com)
+Cross-dataset evaluation confirmed robustness across three independent hospital cohorts.
+F1 scores remained above 0.88 across all tested demographic subgroups.
+
+### 3.2 Comparative Results
+
+Comparative analysis against baseline methods showed consistent improvements.
+[citation:AI Study](https://ai.example.com)
+The proposed approach outperformed prior state-of-the-art by 12% on recall metrics.
+
+## Conclusion
+
+AI in healthcare shows strong promise based on the evidence gathered. Continued
+investment in explainability and regulatory alignment will be key to broad adoption.
+
+## Sources
+
+- [AI Study](https://ai.example.com) - Overview of AI accuracy improvements
+- [Benchmark Paper](https://bench.example.com) - Cross-domain benchmark results
+"""
+
+VALID_OUTLINE = """\
+## 1. Introduction
+
+### 1.1 Background
+[sources: 1]
+
+### 1.2 Problem Statement
+[sources: 2]
+
+## 2. Architecture
+
+### 2.1 Architecture Overview
+[sources: 1, 2]
+
+### 2.2 Design Decisions
+[sources: 3]
+
+## 3. Performance
+
+### 3.1 Performance Analysis
+[sources: 2, 3]
+
+### 3.2 Comparative Results
+[sources: 1, 3]
+"""
+
+
+class TestReportValidateTool:
+    def _make_runtime(self, workspace_path: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            state={"thread_data": {"workspace_path": workspace_path}},
+            context={"thread_id": "thread-test"},
+        )
+
+    @pytest.fixture(autouse=True)
+    def _patch_virtual_path_resolver(self, monkeypatch, tmp_path):
+        class _FakePaths:
+            def resolve_virtual_path(self, thread_id: str, virtual_path: str):
+                assert thread_id == "thread-test"
+                prefix = "/mnt/user-data/"
+                assert virtual_path.startswith(prefix)
+                relative = virtual_path[len(prefix):]
+                return (tmp_path / relative).resolve()
+
+        monkeypatch.setattr(research_tools, "get_paths", lambda: _FakePaths())
+
+    @staticmethod
+    def _virtual_report_path(filename: str = "report.md") -> str:
+        return f"/mnt/user-data/outputs/{filename}"
+
+    @staticmethod
+    def _write_report(tmp_path, content: str, filename: str = "report.md"):
+        report_path = tmp_path / "outputs" / filename
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(content)
+        return report_path
+
+    def test_pass_on_valid_report(self, tmp_path):
+        (tmp_path / "outline.md").write_text(VALID_OUTLINE)
+        self._write_report(tmp_path, VALID_REPORT)
+
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result == "PASS — proceed to report_reviewer"
+
+    def test_fail_on_missing_file(self, tmp_path):
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path("nonexistent.md")
+        )
+        assert result.startswith("FAIL")
+        assert "does not exist" in result
+
+    def test_fail_on_word_count_below_100(self, tmp_path):
+        self._write_report(tmp_path, "## Introduction\n\nToo short.\n\n## Sources\n\n- [x](y)\n")
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "insufficient content" in result
+
+    def test_fail_on_missing_sources_section(self, tmp_path):
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 110) + "\n\n"
+            "## Architecture\n\n" + ("word " * 50) + "\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "Sources" in result
+
+    def test_fail_on_empty_body_section(self, tmp_path):
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 50) + "\n\n"
+            "### Architecture\n\n"
+            "## Conclusion\n\n" + ("word " * 30) + "\n\n"
+            "## Sources\n\n- [Title](https://example.com)\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "empty body" in result
+
+    def test_fail_on_sources_marker_in_report(self, tmp_path):
+        report_with_marker = VALID_REPORT + "\n### Extra Section\n[sources: 4, 5]\nSome content here.\n"
+        self._write_report(tmp_path, report_with_marker)
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "[sources:" in result
+
+    def test_fail_on_section_count_below_threshold(self, tmp_path):
+        # Outline has 6 leaf sections, report only has 1 content section → < 70%
+        big_outline = "\n".join(
+            f"### {i}.1 Section {i}\n[sources: 1]\n" for i in range(1, 7)
+        )
+        (tmp_path / "outline.md").write_text(big_outline)
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 50) + "\n\n"
+            "## Only One Section\n\n" + ("word " * 100) + "\n\n"
+            "## Conclusion\n\n" + ("word " * 30) + "\n\n"
+            "## Sources\n\n- [T](https://x.com)\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "missing" in result.lower() or "content section" in result.lower()
+
+    def test_no_section_count_check_for_small_outline(self, tmp_path):
+        # Outline has 4 leaf sections (< 5), section count check must not trigger
+        small_outline = "\n".join(
+            f"### {i}.1 Section {i}\n[sources: 1]\n" for i in range(1, 5)
+        )
+        (tmp_path / "outline.md").write_text(small_outline)
+        # Report only has 1 content section — would trigger check if N >= 5
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 50) + "\n\n"
+            "## One Section\n\n" + ("word " * 100) + "\n\n"
+            "## Conclusion\n\n" + ("word " * 30) + "\n\n"
+            "## Sources\n\n- [T](https://x.com)\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        # Should pass — small outline does not trigger section count check
+        assert result == "PASS — proceed to report_reviewer"
+
+    def test_pass_message_is_single_line(self, tmp_path):
+        (tmp_path / "outline.md").write_text(VALID_OUTLINE)
+        self._write_report(tmp_path, VALID_REPORT)
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert "\n" not in result.strip()
+
+    def test_pass_when_heading_names_differ_but_count_sufficient(self, tmp_path):
+        # Outline has 5 sections, report has 5 content sections with different names
+        outline = "\n".join(
+            f"### {i}.1 Original Name {i}\n[sources: 1]\n" for i in range(1, 6)
+        )
+        (tmp_path / "outline.md").write_text(outline)
+
+        sections_text = "".join(
+            f"### Renamed Section {i}\n\n" + ("word " * 40) + "\n\n"
+            for i in range(1, 6)
+        )
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 50) + "\n\n"
+            + sections_text
+            + "## Conclusion\n\n" + ("word " * 30) + "\n\n"
+            "## Sources\n\n- [T](https://x.com)\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result == "PASS — proceed to report_reviewer"
+
+    def test_informational_only_in_fail_message(self, tmp_path):
+        # Section count triggers FAIL → informational should appear
+        big_outline = "\n".join(
+            f"### {i}.1 Unique Section Name {i}\n[sources: 1]\n" for i in range(1, 7)
+        )
+        (tmp_path / "outline.md").write_text(big_outline)
+        self._write_report(
+            tmp_path,
+            "## Introduction\n\n" + ("word " * 50) + "\n\n"
+            "## One Content Section\n\n" + ("word " * 100) + "\n\n"
+            "## Sources\n\n- [T](https://x.com)\n"
+        )
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path=self._virtual_report_path()
+        )
+        assert result.startswith("FAIL")
+        assert "[informational]" in result
+
+    def test_resolves_virtual_path(self, tmp_path):
+        """report_validate resolves /mnt/user-data/... virtual paths to host paths."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "outline.md").write_text(VALID_OUTLINE)
+        self._write_report(tmp_path, VALID_REPORT)
+
+        rt = self._make_runtime(str(workspace))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path="/mnt/user-data/outputs/report.md"
+        )
+        assert result == "PASS — proceed to report_reviewer"
+
+    def test_rejects_non_outputs_virtual_path(self, tmp_path):
+        (tmp_path / "outline.md").write_text(VALID_OUTLINE)
+        rt = self._make_runtime(str(tmp_path))
+        result = research_tools.report_validate_tool.func(
+            runtime=rt, file_path="/mnt/user-data/workspace/report.md"
+        )
+        assert result.startswith("FAIL")
+        assert "only accepts file paths under /mnt/user-data/outputs/" in result
 
 
 # ---------------------------------------------------------------------------

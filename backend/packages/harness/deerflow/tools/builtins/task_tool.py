@@ -13,6 +13,7 @@ from langgraph.typing import ContextT
 from deerflow.agents.lead_agent.prompt import get_skills_prompt_section
 from deerflow.agents.thread_state import ThreadState
 from deerflow.subagents import SubagentExecutor, get_subagent_config
+from deerflow.subagents.builtins import BUILTIN_SUBAGENTS
 from deerflow.subagents.executor import SubagentStatus, cleanup_background_task, get_background_task_result
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ def task_tool(
     runtime: ToolRuntime[ContextT, ThreadState],
     description: str,
     prompt: str,
-    subagent_type: Literal["general-purpose", "bash", "reflection"],
+    subagent_type: Literal["general-purpose", "bash", "reflection", "report_reviewer"],
     tool_call_id: Annotated[str, InjectedToolCallId],
     max_turns: int | None = None,
 ) -> str:
@@ -44,6 +45,10 @@ def task_tool(
       (outline.md, evidence_bank.json, research_state.json) and returns a JSON
       assessment with research_iterations, research_complete, suggested_queries,
       and outline_evolution. Use during Phase 1 research loop.
+    - **report_reviewer**: Research report reviewer that cross-checks the draft
+      against the evidence bank, enriches with specific data, adds missing
+      citations, and softens unsupported claims. Use during write-stage report
+      assembly after report_validate passes.
 
     When to use this tool:
     - Complex tasks requiring multiple steps or tools
@@ -64,7 +69,8 @@ def task_tool(
     # Get subagent configuration
     config = get_subagent_config(subagent_type)
     if config is None:
-        return f"Error: Unknown subagent type '{subagent_type}'. Available: general-purpose, bash, reflection"
+        available = ", ".join(BUILTIN_SUBAGENTS.keys())
+        return f"Error: Unknown subagent type '{subagent_type}'. Available: {available}"
 
     # Build config overrides
     overrides: dict = {}

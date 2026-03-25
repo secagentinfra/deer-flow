@@ -10,6 +10,7 @@ from langchain.tools import ToolRuntime, tool
 from langgraph.typing import ContextT
 
 from deerflow.agents.thread_state import ThreadState
+from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
 
 _mb_lock = threading.Lock()
 
@@ -212,6 +213,205 @@ def outline_update_tool(
         "- In writing phase: cite with [citation:Title](URL) format, call evidence_retrieve BEFORE each section\n"
         "- Call task(subagent_type='reflection') to assess completeness and get next search suggestions."
     )
+
+
+def _extract_heading_key(heading: str) -> str:
+    """Strip '#' prefix and leading number/dot prefix to get key text.
+
+    '### 2.1 Architecture Overview' → 'Architecture Overview'
+    '## Performance Analysis' → 'Performance Analysis'
+    """
+    text = re.sub(r"^#+\s*", "", heading).strip()
+    text = re.sub(r"^\d+(\.\d+)*\.?\s+", "", text).strip()
+    return text
+
+
+def _parse_report_sections(report_text: str) -> list[tuple[str, str]]:
+    """Parse report into [(heading_raw, body_text), ...] split by any ATX heading (#–######)."""
+    sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_body_lines: list[str] = []
+
+    for line in report_text.splitlines():
+        if re.match(r"^#{1,6}\s+", line):
+            if current_heading is not None:
+                sections.append((current_heading, "\n".join(current_body_lines)))
+            current_heading = line
+            current_body_lines = []
+        else:
+            if current_heading is not None:
+                current_body_lines.append(line)
+
+    if current_heading is not None:
+        sections.append((current_heading, "\n".join(current_body_lines)))
+
+    return sections
+
+
+def _heading_level(heading: str) -> int:
+    """Return the heading depth: '#' → 1, '##' → 2, '###' → 3, etc."""
+    m = re.match(r"^(#+)\s+", heading.strip())
+    return len(m.group(1)) if m else 0
+
+
+def _is_content_section(heading_key: str) -> bool:
+    """Return False for Introduction, Conclusion, Sources, References headings.
+
+    Applied only to leaf sections (###+); # and ## are excluded upstream by
+    _heading_level. The 'introduction' keyword here mainly catches an explicit
+    '### 1.1 Introduction'-style subsection.
+    """
+    lower = heading_key.lower()
+    return not any(kw in lower for kw in ("introduction", "conclusion", "sources", "references"))
+
+
+@tool("report_validate", parse_docstring=True)
+def report_validate_tool(
+    runtime: ToolRuntime[ContextT, ThreadState],
+    file_path: str,
+) -> str:
+    """Validate a research report against the outline and citation requirements.
+
+    Call this after assembling the report and before presenting it.
+    Fix any reported issues and call again until PASS.
+
+    Args:
+        file_path: Absolute virtual path to the report file under
+            `/mnt/user-data/outputs/`.
+    """
+    workspace = _get_workspace_path(runtime)
+    thread_id = None
+    if runtime and getattr(runtime, "context", None):
+        thread_id = runtime.context.get("thread_id")
+
+    if not thread_id:
+        return (
+            "FAIL — 1 issue(s) found:\n"
+            "1. Thread ID is not available in runtime context.\n"
+            "Fix FAIL issues and call report_validate again."
+        )
+
+    expected_prefix = f"{VIRTUAL_PATH_PREFIX}/outputs/"
+    if not file_path.startswith(expected_prefix):
+        return (
+            "FAIL — 1 issue(s) found:\n"
+            f"1. report_validate only accepts file paths under {expected_prefix}\n"
+            "Fix FAIL issues and call report_validate again."
+        )
+
+    try:
+        report_path = get_paths().resolve_virtual_path(thread_id, file_path)
+    except ValueError as exc:
+        return (
+            "FAIL — 1 issue(s) found:\n"
+            f"1. Invalid report path: {exc}\n"
+            "Fix FAIL issues and call report_validate again."
+        )
+
+    issues: list[str] = []
+
+    # --- Check 1: Report file exists and has substantial content ---
+    if not report_path.exists():
+        issues.append("Report file does not exist.")
+        return (
+            f"FAIL — {len(issues)} issue(s) found:\n"
+            + "\n".join(f"{i + 1}. {iss}" for i, iss in enumerate(issues))
+            + "\nFix FAIL issues and call report_validate again."
+        )
+
+    report_text = report_path.read_text(encoding="utf-8")
+    word_count = len(report_text.split())
+    if word_count < 100:
+        issues.append(
+            f"Report has insufficient content ({word_count} words). "
+            "Ensure the report is fully written before validating."
+        )
+
+    # Parse report sections once (used for checks 2, 3, 4).
+    # leaf_content_sections: only ### and deeper headings that are not structural
+    # keywords (introduction/conclusion/sources/references).  # and ## headings
+    # are container-level and are not required to carry body text.
+    report_sections = _parse_report_sections(report_text)
+    leaf_content_sections = [
+        (h, b) for h, b in report_sections
+        if _heading_level(h) >= 3 and _is_content_section(_extract_heading_key(h))
+    ]
+
+    # --- Check 2: Outline section count matches report section count ---
+    outline_path = workspace / "outline.md"
+    informational_lines: list[str] = []
+    if outline_path.exists():
+        outline_text = outline_path.read_text(encoding="utf-8")
+        parsed = _parse_outline(outline_text)
+        outline_leaf_count = len(parsed)
+
+        if outline_leaf_count >= 5:
+            report_content_count = len(leaf_content_sections)
+
+            if report_content_count < outline_leaf_count * 0.7:
+                issues.append(
+                    f"Report has {report_content_count} content section(s) but outline has "
+                    f"{outline_leaf_count} subsection(s) — more than 30% appear to be missing."
+                )
+                # Informational: heading name matching
+                report_heading_keys = {
+                    _extract_heading_key(h).lower() for h, _ in report_sections
+                }
+                unmatched = []
+                for outline_heading in parsed:
+                    key = _extract_heading_key(outline_heading)
+                    key_lower = key.lower()
+                    matched = any(
+                        key_lower in rk or rk in key_lower
+                        for rk in report_heading_keys
+                    )
+                    if not matched:
+                        unmatched.append(key)
+                if unmatched:
+                    informational_lines.append(
+                        "[informational] Outline sections not matched by heading: "
+                        + ", ".join(unmatched)
+                        + " (verify content is merged into other sections)"
+                    )
+
+    # --- Check 3: Per-leaf-content-section body is non-empty ---
+    for heading, body in leaf_content_sections:
+        if not body.strip():
+            issues.append(
+                f'Section "{_extract_heading_key(heading)}" has an empty body. '
+                "Write the section content before validating."
+            )
+
+    # --- Check 4: Sources section exists and is non-empty ---
+    has_sources = False
+    for heading, body in report_sections:
+        key_lower = _extract_heading_key(heading).lower()
+        if "sources" in key_lower or "references" in key_lower:
+            if "- [" in body:
+                has_sources = True
+                break
+    if not has_sources:
+        issues.append(
+            'No Sources/References section found, or the section contains no "- [" entries. '
+            "Add a Sources section listing all cited URLs."
+        )
+
+    # --- Check 5: No [sources: ...] outline markers in report body ---
+    if re.search(r"\[sources:", report_text):
+        issues.append(
+            'Report contains "[sources: ...]" outline markers. '
+            "Remove all [sources: ...] lines — they belong in the outline only."
+        )
+
+    if not issues:
+        return "PASS — proceed to report_reviewer"
+
+    fail_lines = [f"{i + 1}. {iss}" for i, iss in enumerate(issues)]
+    output = "FAIL — {} issue(s) found:\n{}\n".format(len(issues), "\n".join(fail_lines))
+    if informational_lines:
+        output += "\n".join(informational_lines) + "\n"
+    output += "Fix FAIL issues and call report_validate again."
+    return output
 
 
 @tool("check_query_duplicate", parse_docstring=True)

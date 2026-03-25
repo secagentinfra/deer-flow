@@ -52,6 +52,9 @@ All evidence is persisted in the workspace:
 
 ### Writing Protocol
 
+**Report structure rule:**
+- Use `##` ONLY for chapter containers; write section content under `###` (or deeper) headings.
+
 **For EACH section in the outline, in order:**
 
 1. Read the `[sources: X, Y]` line below the section heading
@@ -71,7 +74,9 @@ All evidence is persisted in the workspace:
 2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
 3. Generate a Sources section: `- [Title](URL) - brief description`
 4. Save to `/mnt/user-data/outputs/`
-5. Call `present_files` to deliver the report
+5. Call `report_validate` with the saved file path — fix any issues it reports, then call again until PASS
+6. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 7
+7. Call `present_files` to deliver the report
 
 **Prohibitions:**
 - Do NOT call `web_search` or `web_fetch`
