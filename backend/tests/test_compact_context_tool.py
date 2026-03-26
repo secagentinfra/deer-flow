@@ -313,6 +313,16 @@ class TestKickoffWritingProtocol:
         kickoff = self._get_kickoff(tmp_path)
         assert "Do NOT call `web_search`" in kickoff or "Do NOT call web_search" in kickoff
 
+    def test_kickoff_contains_incremental_write_instruction(self, tmp_path):
+        """Kickoff must instruct agent to use write_file(append=True) for sections."""
+        kickoff = self._get_kickoff(tmp_path)
+        assert "append=True" in kickoff or "append" in kickoff
+
+    def test_kickoff_does_not_contain_assembly_instruction(self, tmp_path):
+        """Kickoff must NOT contain the old assembly instruction."""
+        kickoff = self._get_kickoff(tmp_path)
+        assert "Combine all sections" not in kickoff
+
 
 # ---------------------------------------------------------------------------
 # Phase 5.1: original_query injection and language instruction

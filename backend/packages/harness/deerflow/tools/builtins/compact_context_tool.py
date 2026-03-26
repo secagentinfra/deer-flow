@@ -58,13 +58,27 @@ All evidence is persisted in the workspace:
 **Report structure rule:**
 - Use `##` ONLY for chapter containers; write section content under `###` (or deeper) headings.
 
-**For EACH section in the outline, in order:**
+**Step 1 — Initialize the report:**
+1. Choose a report file path under `/mnt/user-data/outputs/`
+2. Write the report title (`# Title`) and Introduction to the file using `write_file`
+   - Base the Introduction on the research summary above (key themes, scope, structure preview)
 
+**Step 2 — Write sections incrementally:**
+
+For EACH section in the outline, in order:
 1. Read the `[sources: X, Y]` line below the section heading
 2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
-3. Write the section **immediately** after retrieving — do NOT retrieve multiple sections before writing.
-   Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
+3. Append the section to the report file **immediately** using `write_file(append=True)` — do NOT retrieve multiple sections before writing.
+   - Include the `##` chapter heading when starting a new chapter
+   - Include the `###` section heading, full section body, and inline citations
+   - Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
 4. Move to the next section and repeat
+
+**Step 3 — Finalize the report:**
+1. Append Conclusion (key takeaways) and Sources section (`- [Title](URL) - brief description`) to the report file using `write_file(append=True)`
+2. Call `report_validate` with the report file path — fix any issues it reports, then call again until PASS
+3. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 4
+4. Call `present_files` to deliver the report
 
 **Quality requirements:**
 - Cite EVERY factual statement — no uncited claims
@@ -72,18 +86,10 @@ All evidence is persisted in the workspace:
 - Include ≥2 comparative or summary tables with post-table analysis
 - Analyze WHY findings matter, not just WHAT they are
 
-**Report assembly (after all sections are written):**
-1. Combine all sections into a single report
-2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
-3. Generate a Sources section: `- [Title](URL) - brief description`
-4. Save to `/mnt/user-data/outputs/`
-5. Call `report_validate` with the saved file path — fix any issues it reports, then call again until PASS
-6. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 7
-7. Call `present_files` to deliver the report
-
 **Prohibitions:**
 - Do NOT call `web_search` or `web_fetch`
 - Do NOT include `[sources: ...]` lines in the report — those are outline-only markers
+- Do NOT accumulate sections in chat and combine later — write each section directly to the file
 """
 
 
@@ -222,7 +228,12 @@ def compact_context_tool(
             update={
                 "messages": [
                     ToolMessage(
-                        content=f"compact_context failed: {e}. Proceed to writing with full history.",
+                        content=(
+                            f"compact_context failed: {e}. "
+                            "Proceed to writing using the full conversation history. "
+                            "Follow the Phase 2 (Hierarchical Writing) and Phase 3 (Report Finalization) "
+                            "steps from the deep-research skill instructions in your context."
+                        ),
                         tool_call_id=tool_call_id,
                     )
                 ]

@@ -662,6 +662,7 @@ def write_file_tool(
         description: Explain why you are writing to this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         path: The **absolute** path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND.
         content: The content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD.
+        append: If True, append content to the end of the file instead of overwriting. Defaults to False.
     """
     try:
         sandbox = ensure_sandbox_initialized(runtime)

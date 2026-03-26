@@ -25,4 +25,9 @@ def web_fetch_tool(url: str) -> str:
         timeout = config.model_extra.get("timeout")
     html_content = jina_client.crawl(url, return_format="html", timeout=timeout)
     article = readability_extractor.extract_article(html_content)
-    return article.to_markdown()[:4096]
+    content = article.to_markdown()[:24000]
+    return (
+        f"{content}\n\n"
+        "⚠️ REMINDER: You MUST call `evidence_store` for ALL useful findings "
+        "before moving on. Unstored evidence cannot be cited in the report."
+    )

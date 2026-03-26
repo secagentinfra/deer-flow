@@ -60,4 +60,9 @@ def web_fetch_tool(url: str) -> str:
     if result.startswith("Error: "):
         return result
     article = readability_extractor.extract_article(result)
-    return article.to_markdown()[:4096]
+    content = article.to_markdown()[:24000]
+    return (
+        f"{content}\n\n"
+        "⚠️ REMINDER: You MUST call `evidence_store` for ALL useful findings "
+        "before moving on. Unstored evidence cannot be cited in the report."
+    )

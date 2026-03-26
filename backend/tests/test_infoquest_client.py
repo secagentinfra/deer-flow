@@ -155,7 +155,8 @@ class TestInfoQuestClient:
 
         result = tools.web_fetch_tool.run("https://example.com")
 
-        assert result == "# Untitled\n\nTest content"
+        assert result.startswith("# Untitled\n\nTest content")
+        assert "evidence_store" in result
         mock_get_client.assert_called_once()
         mock_client.fetch.assert_called_once_with("https://example.com")
 

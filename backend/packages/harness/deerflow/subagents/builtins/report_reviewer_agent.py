@@ -90,6 +90,6 @@ REPORT_REVIEWER_CONFIG = SubagentConfig(
         "report_validate",
     ],
     model="inherit",
-    max_turns=20,
+    max_turns=30,
     timeout_seconds=180,
 )

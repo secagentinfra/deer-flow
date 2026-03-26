@@ -94,11 +94,15 @@ After the reflection subagent returns `research_complete: true`
 
 ### Phase 2: Hierarchical Writing
 
+**Report initialization:**
+1. Choose a report file path under `/mnt/user-data/outputs/`
+2. Write the report title and Introduction to the file using `write_file`
+
 **For EACH section in the outline, in order:**
 
 1. Read the `[sources: X, Y]` line below the section heading
 2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
-3. Write the section **immediately** after retrieving — do NOT retrieve multiple sections before writing.
+3. Append the section to the report file **immediately** using `write_file(append=True)` — do NOT retrieve multiple sections before writing.
    Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
 4. Move to the next section and repeat
 
@@ -108,15 +112,12 @@ After the reflection subagent returns `research_complete: true`
 - Include ≥2 comparative or summary tables with post-table analysis
 - Analyze WHY findings matter, not just WHAT they are
 
-### Phase 3: Report Assembly
+### Phase 3: Report Finalization
 
-1. Combine all sections into a single report
-2. Add Introduction (synthesize key themes) and Conclusion (key takeaways)
-3. Generate a Sources section: `- [Title](URL) - brief description`
-4. Save to `/mnt/user-data/outputs/`
-5. Call `report_validate` with the saved file path — fix any issues it reports, then call again until PASS
-6. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 7
-7. Call `present_files` to deliver the report
+1. Append Conclusion (key takeaways) and Sources section (`- [Title](URL) - brief description`) to the report file using `write_file(append=True)`
+2. Call `report_validate` with the report file path — fix any issues it reports, then call again until PASS
+3. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 4
+4. Call `present_files` to deliver the report
 
 ## Search Strategy
 

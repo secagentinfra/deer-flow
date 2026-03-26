@@ -59,7 +59,7 @@ class TestReportReviewerConfig:
             )
 
     def test_max_turns(self, reviewer_config):
-        assert reviewer_config.max_turns == 20
+        assert reviewer_config.max_turns == 30
 
     def test_timeout_seconds(self, reviewer_config):
         assert reviewer_config.timeout_seconds == 180

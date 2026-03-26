@@ -70,4 +70,9 @@ def web_fetch_tool(url: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-    return f"# {title}\n\n{markdown_content[:4096]}"
+    content = f"# {title}\n\n{markdown_content[:24000]}"
+    return (
+        f"{content}\n\n"
+        "⚠️ REMINDER: You MUST call `evidence_store` for ALL useful findings "
+        "before moving on. Unstored evidence cannot be cited in the report."
+    )
