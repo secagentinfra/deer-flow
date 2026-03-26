@@ -152,9 +152,10 @@ def evidence_retrieve_tool(
     body = "\n\n".join(results)
     return (
         f"{body}\n\n"
-        "REMINDER: Cite sources using [citation:Title](URL) format in the report. "
-        "Use the Title and URL from each <source> block above. "
-        "Example: [citation:AI Diagnosis Accuracy](https://example.com/page1). "
+        "REMINDER: Write ONLY the current section now using [citation:Title](URL) inline citations "
+        "from the <source> blocks above. After finishing this section, call evidence_retrieve "
+        "for the NEXT section's source IDs before writing it. "
+        "Do NOT write multiple sections before retrieving evidence for each. "
         "Do NOT include [sources: ...] lines in the report — those are outline-only markers."
     )
 
@@ -382,18 +383,22 @@ def report_validate_tool(
                 "Write the section content before validating."
             )
 
-    # --- Check 4: Sources section exists and is non-empty ---
+    # --- Check 4: Sources section exists with sufficient formatted entries ---
+    # Language-agnostic: detect by structure ([Title](URL) list items), not heading keywords.
     has_sources = False
     for heading, body in report_sections:
-        key_lower = _extract_heading_key(heading).lower()
-        if "sources" in key_lower or "references" in key_lower:
-            if "- [" in body:
-                has_sources = True
-                break
+        source_lines = sum(
+            1 for line in body.splitlines()
+            if line.strip().startswith("- [") or re.match(r"^\d+\.\s*\[", line.strip())
+        )
+        if source_lines >= 2:
+            has_sources = True
+            break
     if not has_sources:
         issues.append(
-            'No Sources/References section found, or the section contains no "- [" entries. '
-            "Add a Sources section listing all cited URLs."
+            "No Sources section detected. "
+            "Ensure the report has a section with at least 2 list entries "
+            'in "- [Title](URL) - description" format.'
         )
 
     # --- Check 5: No [sources: ...] outline markers in report body ---

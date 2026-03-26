@@ -5,8 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
+from langchain_core.messages import HumanMessage, RemoveMessage, ToolMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Command
 
@@ -313,3 +312,78 @@ class TestKickoffWritingProtocol:
     def test_kickoff_prohibits_web_search(self, tmp_path):
         kickoff = self._get_kickoff(tmp_path)
         assert "Do NOT call `web_search`" in kickoff or "Do NOT call web_search" in kickoff
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.1: original_query injection and language instruction
+# ---------------------------------------------------------------------------
+
+
+class TestPhase51OriginalQueryInjection:
+    """Verify original_query is extracted and language instruction appears in kickoff."""
+
+    def _run_tool(self, tmp_path, messages):
+        with (
+            patch(
+                "deerflow.tools.builtins.compact_context_tool.create_chat_model"
+            ) as mock_create_model,
+            patch(
+                "deerflow.tools.builtins.compact_context_tool.SummarizationMiddleware"
+            ) as mock_sm_class,
+        ):
+            mock_create_model.return_value = MagicMock()
+            mock_middleware = MagicMock()
+            mock_middleware._create_summary.return_value = "Research summary"
+            mock_sm_class.return_value = mock_middleware
+
+            runtime = _make_runtime(messages=messages, workspace_path=str(tmp_path))
+            return _call_tool(runtime)
+
+    def _get_kickoff(self, result) -> str:
+        kickoff_msgs = [
+            m
+            for m in result.update["messages"]
+            if isinstance(m, HumanMessage) and "Writing Protocol" in m.content
+        ]
+        assert len(kickoff_msgs) == 1
+        return kickoff_msgs[0].content
+
+    def test_kickoff_contains_original_query(self, tmp_path):
+        messages = [HumanMessage(content="深度研究：量子计算在密码学中的应用")]
+        result = self._run_tool(tmp_path, messages)
+        kickoff = self._get_kickoff(result)
+        assert "深度研究：量子计算在密码学中的应用" in kickoff
+
+    def test_kickoff_contains_language_instruction(self, tmp_path):
+        messages = [HumanMessage(content="research quantum computing")]
+        result = self._run_tool(tmp_path, messages)
+        kickoff = self._get_kickoff(result)
+        assert "Write the entire report in the same language as the Original Research Query above." in kickoff
+
+    def test_kickoff_extracts_first_human_message(self, tmp_path):
+        messages = [
+            HumanMessage(content="first query"),
+            HumanMessage(content="second query"),
+        ]
+        result = self._run_tool(tmp_path, messages)
+        kickoff = self._get_kickoff(result)
+        assert "first query" in kickoff
+        assert "second query" not in kickoff
+
+    def test_no_crash_when_no_human_messages(self, tmp_path):
+        """original_query gracefully degrades to empty string with no HumanMessage."""
+        messages = []
+        result = self._run_tool(tmp_path, messages)
+        assert isinstance(result, Command)
+        kickoff = self._get_kickoff(result)
+        assert "Original Research Query" in kickoff
+
+    def test_skips_empty_human_messages(self, tmp_path):
+        messages = [
+            HumanMessage(content=""),
+            HumanMessage(content="   "),
+            HumanMessage(content="actual query"),
+        ]
+        result = self._run_tool(tmp_path, messages)
+        kickoff = self._get_kickoff(result)
+        assert "actual query" in kickoff

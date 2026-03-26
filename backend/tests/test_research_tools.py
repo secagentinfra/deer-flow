@@ -801,7 +801,7 @@ class TestReportValidateTool:
             "## Introduction\n\n" + ("word " * 50) + "\n\n"
             "## One Section\n\n" + ("word " * 100) + "\n\n"
             "## Conclusion\n\n" + ("word " * 30) + "\n\n"
-            "## Sources\n\n- [T](https://x.com)\n"
+            "## Sources\n\n- [T](https://x.com)\n- [U](https://y.com)\n"
         )
         rt = self._make_runtime(str(tmp_path))
         result = research_tools.report_validate_tool.func(
@@ -835,7 +835,7 @@ class TestReportValidateTool:
             "## Introduction\n\n" + ("word " * 50) + "\n\n"
             + sections_text
             + "## Conclusion\n\n" + ("word " * 30) + "\n\n"
-            "## Sources\n\n- [T](https://x.com)\n"
+            "## Sources\n\n- [T](https://x.com)\n- [U](https://y.com)\n"
         )
         rt = self._make_runtime(str(tmp_path))
         result = research_tools.report_validate_tool.func(
@@ -904,3 +904,102 @@ class TestWorkspacePath:
         rt = _make_runtime(str(tmp_path))
         path = research_tools._get_workspace_path(rt)
         assert path == tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.1: report_validate Check 4 — language-agnostic source detection
+# ---------------------------------------------------------------------------
+
+_LONG_BODY = "word " * 60  # enough content to avoid word-count FAIL per section
+
+
+class TestReportValidateCheck4LanguageAgnostic:
+    """Verify Check 4 uses structural - [ detection, not English heading keywords."""
+
+    def _make_runtime(self, workspace_path: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            state={"thread_data": {"workspace_path": workspace_path}},
+            context={"thread_id": "thread-test"},
+        )
+
+    @pytest.fixture(autouse=True)
+    def _patch_virtual_path_resolver(self, monkeypatch, tmp_path):
+        class _FakePaths:
+            def resolve_virtual_path(self, thread_id: str, virtual_path: str):
+                prefix = "/mnt/user-data/"
+                relative = virtual_path[len(prefix):]
+                return (tmp_path / relative).resolve()
+
+        monkeypatch.setattr(research_tools, "get_paths", lambda: _FakePaths())
+
+    @staticmethod
+    def _write_report(tmp_path, content: str):
+        report_path = tmp_path / "outputs" / "report.md"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(content)
+
+    @staticmethod
+    def _simple_outline():
+        return (
+            "## 1. Introduction\n\n"
+            "### 1.1 背景\n[sources: 1]\n\n"
+            "### 1.2 问题\n[sources: 2]\n"
+        )
+
+    def _run(self, tmp_path, report_content: str) -> str:
+        (tmp_path / "outline.md").write_text(self._simple_outline())
+        self._write_report(tmp_path, report_content)
+        rt = self._make_runtime(str(tmp_path))
+        return research_tools.report_validate_tool.func(
+            runtime=rt, file_path="/mnt/user-data/outputs/report.md"
+        )
+
+    def test_chinese_heading_with_two_entries_passes(self, tmp_path):
+        """Chinese heading '## 参考文献' + 2 '- [' entries → PASS (no English keyword needed)."""
+        report = (
+            "## 1. 介绍\n\n"
+            "### 1.1 背景\n\n" + _LONG_BODY + "\n\n"
+            "### 1.2 问题\n\n" + _LONG_BODY + "\n\n"
+            "## 参考文献\n\n"
+            "- [来源一](https://example.com/a) - 说明一\n"
+            "- [来源二](https://example.com/b) - 说明二\n"
+        )
+        result = self._run(tmp_path, report)
+        assert result == "PASS — proceed to report_reviewer"
+
+    def test_no_source_entries_fails(self, tmp_path):
+        """Report with no '- [' entries anywhere → FAIL."""
+        report = (
+            "## 1. Introduction\n\n"
+            "### 1.1 背景\n\n" + _LONG_BODY + "\n\n"
+            "### 1.2 问题\n\n" + _LONG_BODY + "\n\n"
+            "## 参考文献\n\nNo formatted entries here.\n"
+        )
+        result = self._run(tmp_path, report)
+        assert result.startswith("FAIL")
+        assert "Sources section detected" in result or "Sources" in result
+
+    def test_only_one_source_entry_fails(self, tmp_path):
+        """Report with exactly 1 '- [' entry → FAIL (threshold is >= 2)."""
+        report = (
+            "## 1. Introduction\n\n"
+            "### 1.1 背景\n\n" + _LONG_BODY + "\n\n"
+            "### 1.2 问题\n\n" + _LONG_BODY + "\n\n"
+            "## 参考文献\n\n"
+            "- [Only Source](https://example.com) - the only entry\n"
+        )
+        result = self._run(tmp_path, report)
+        assert result.startswith("FAIL")
+
+    def test_english_heading_with_two_entries_still_passes(self, tmp_path):
+        """English '## Sources' + 2 entries → PASS (backward compatibility)."""
+        report = (
+            "## 1. Introduction\n\n"
+            "### 1.1 背景\n\n" + _LONG_BODY + "\n\n"
+            "### 1.2 问题\n\n" + _LONG_BODY + "\n\n"
+            "## Sources\n\n"
+            "- [Source A](https://example.com/a) - desc a\n"
+            "- [Source B](https://example.com/b) - desc b\n"
+        )
+        result = self._run(tmp_path, report)
+        assert result == "PASS — proceed to report_reviewer"

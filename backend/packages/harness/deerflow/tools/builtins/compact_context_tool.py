@@ -42,7 +42,10 @@ Messages to summarize:
 WRITER_KICKOFF_TEMPLATE = """\
 ## Phase Transition: Research to Writing
 
+**Original Research Query**: {original_query}
+
 You are now in the **Writing Phase** of the Deep Research methodology.
+Write the entire report in the same language as the Original Research Query above.
 The conversation history above is a compressed summary of {research_iterations}
 research iterations with {total_sources} sources.
 
@@ -143,6 +146,14 @@ def compact_context_tool(
         workspace = _get_workspace_path(runtime)
         metadata = _read_research_metadata(workspace)
 
+        original_query = ""
+        for msg in messages:
+            if isinstance(msg, HumanMessage) and msg.content:
+                text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                if text.strip():
+                    original_query = text.strip()
+                    break
+
         # Build summarization model — reuse SummarizationMiddleware config model if set,
         # otherwise fall back to the default model.
         config = get_summarization_config()
@@ -163,6 +174,7 @@ def compact_context_tool(
             research_iterations=metadata["research_iterations"],
             total_sources=metadata["total_sources"],
             outline_path=f"{VIRTUAL_PATH_PREFIX}/workspace/outline.md",
+            original_query=original_query,
         )
 
         logger.info(
