@@ -210,7 +210,7 @@ def outline_update_tool(
         f"Outline updated ({total} subsections, {cited} with sources). "
         f"Total sources in evidence bank: {total_sources}.{id_warning}\n"
         "REMINDER:\n"
-        "- Each subsection needs a [sources: 1, 2] line below it (outline tracking ONLY)\n"
+        "- Each subsection needs a [sources: <ID>, ...] line below it listing actual source IDs (outline tracking ONLY)\n"
         "- Call task(subagent_type='reflection') to assess completeness and get next search suggestions."
     )
 

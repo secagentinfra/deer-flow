@@ -56,7 +56,9 @@ All evidence is persisted in the workspace:
 ### Writing Protocol
 
 **Report structure rule:**
-- Use `##` ONLY for chapter containers; write section content under `###` (or deeper) headings.
+- Follow the outline's heading hierarchy: `##` for chapters, `###` for sections within them.
+- Chapters with subsections in the outline should NOT have loose content above the first `###`.
+- Short chapters (e.g., Introduction, Conclusion) may contain content directly under `##`.
 
 **Step 1 — Initialize the report:**
 1. Choose a report file path under `/mnt/user-data/outputs/`
@@ -66,7 +68,7 @@ All evidence is persisted in the workspace:
 **Step 2 — Write sections incrementally:**
 
 For EACH section in the outline, in order:
-1. Read the `[sources: X, Y]` line below the section heading
+1. Read the `[sources: <ID>, ...]` line below the section heading
 2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
 3. Append the section to the report file **immediately** using `write_file(append=True)` — do NOT retrieve multiple sections before writing.
    - Include the `##` chapter heading when starting a new chapter
@@ -79,6 +81,15 @@ For EACH section in the outline, in order:
 2. Call `report_validate` with the report file path — fix any issues it reports, then call again until PASS
 3. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 4
 4. Call `present_files` to deliver the report
+
+**Writing style — make every word tell:**
+- **Active voice**: "The study revealed..." not "It was revealed by the study..."
+- **Positive, definite assertions**: "Growth slowed to 2%" not "Growth was not very strong"
+- **Concrete language**: Prefer specific data, names, and numbers over vague abstractions
+- **Omit needless words**: Cut filler ("the fact that", "it is worth noting that", "in order to"). A sentence should contain no unnecessary words, a paragraph no unnecessary sentences.
+- **Topic sentences**: Open each paragraph with its central claim; develop with evidence, close with significance
+- **Parallel construction**: Express comparable ideas in matching grammatical form (tables, lists, comparisons)
+- **Emphatic endings**: Place the key insight at the end of each sentence and paragraph
 
 **Quality requirements:**
 - Cite EVERY factual statement — no uncited claims

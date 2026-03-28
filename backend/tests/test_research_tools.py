@@ -289,7 +289,7 @@ class TestOutlineUpdate:
             runtime=rt, outline_content="### Section 1\n",
         )
         assert "REMINDER" in result
-        assert "[sources: 1, 2]" in result
+        assert "[sources: <ID>" in result
         assert "<citation>" not in result
         assert "research_reflect" not in result
         assert "task(subagent_type='reflection')" in result

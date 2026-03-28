@@ -71,7 +71,7 @@ class TestReportReviewerConfig:
 class TestReportReviewerSystemPrompt:
     def test_contains_skip_condition_for_missing_sources_annotation(self, reviewer_config):
         prompt = reviewer_config.system_prompt
-        assert "[sources: X, Y]" in prompt or "no [sources:" in prompt or "sources: X, Y" in prompt
+        assert "[sources: <ID>" in prompt or "no [sources:" in prompt or "[sources:" in prompt
 
     def test_contains_three_priority_tasks(self, reviewer_config):
         prompt = reviewer_config.system_prompt

@@ -62,8 +62,8 @@ This skill implements a structured deep research methodology inspired by state-o
    - `summary`: 1-2 sentence summary of relevance
    - `evidence`: Detailed extracted quotes, data points, key findings
    - `goal`: The search goal this evidence relates to
-8. **Update outline sources**: Call `outline_update` to add `[sources: 1, 2]` annotations
-   below subsections with new evidence:
+8. **Update outline sources**: Call `outline_update` to add `[sources: <ID>, ...]` annotations
+   below subsections with new evidence (use actual source IDs from `evidence_store`):
    ```
    ### 2.1 Architecture Overview
    [sources: 4, 5, 6]
@@ -74,7 +74,7 @@ This skill implements a structured deep research methodology inspired by state-o
 - Use BULLET POINTS for evidence, not paragraphs
 - Note surprising findings and contradictions
 - `task(subagent_type="reflection")` is the cycle anchor — do NOT invent your own search direction when `suggested_queries` is available
-- Each subsection needs a `[sources: 1, 2]` line below it (NOT in the heading)
+- Each subsection needs a `[sources: <ID>, ...]` line below it (NOT in the heading) listing the actual source IDs relevant to that subsection
 - Do NOT use `<citation>` tags — they are deprecated
 - If `outline_evolution` suggests new sections or restructuring, update the outline FIRST
 - Fetch FULL content for promising results, don't rely on snippets
@@ -94,17 +94,35 @@ After the reflection subagent returns `research_complete: true`
 
 ### Phase 2: Hierarchical Writing
 
-**Report initialization:**
+**Report structure rule:**
+- Follow the outline's heading hierarchy: `##` for chapters, `###` for sections within them.
+- Chapters with subsections in the outline should NOT have loose content above the first `###`.
+- Short chapters (e.g., Introduction, Conclusion) may contain content directly under `##`.
+
+**Step 1 — Initialize the report:**
 1. Choose a report file path under `/mnt/user-data/outputs/`
-2. Write the report title and Introduction to the file using `write_file`
+2. Write the report title (`# Title`) and Introduction to the file using `write_file`
+   - Base the Introduction on the research summary (key themes, scope, structure preview)
 
-**For EACH section in the outline, in order:**
+**Step 2 — Write sections incrementally:**
 
-1. Read the `[sources: X, Y]` line below the section heading
+For EACH section in the outline, in order:
+1. Read the `[sources: <ID>, ...]` line below the section heading
 2. Call `evidence_retrieve` with those source IDs — one call per section, do NOT batch all sources in one call
 3. Append the section to the report file **immediately** using `write_file(append=True)` — do NOT retrieve multiple sections before writing.
-   Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
+   - Include the `##` chapter heading when starting a new chapter
+   - Include the `###` section heading, full section body, and inline citations
+   - Use `[citation:Title](URL)` inline citations with the Title and URL from each `<source>` block
 4. Move to the next section and repeat
+
+**Writing style — make every word tell:**
+- **Active voice**: "The study revealed..." not "It was revealed by the study..."
+- **Positive, definite assertions**: "Growth slowed to 2%" not "Growth was not very strong"
+- **Concrete language**: Prefer specific data, names, and numbers over vague abstractions
+- **Omit needless words**: Cut filler ("the fact that", "it is worth noting that", "in order to"). A sentence should contain no unnecessary words, a paragraph no unnecessary sentences.
+- **Topic sentences**: Open each paragraph with its central claim; develop with evidence, close with significance
+- **Parallel construction**: Express comparable ideas in matching grammatical form (tables, lists, comparisons)
+- **Emphatic endings**: Place the key insight at the end of each sentence and paragraph
 
 **Quality requirements:**
 - Cite EVERY factual statement — no uncited claims
@@ -118,6 +136,11 @@ After the reflection subagent returns `research_complete: true`
 2. Call `report_validate` with the report file path — fix any issues it reports, then call again until PASS
 3. Call `task(subagent_type="report_reviewer", prompt="Review and improve the research report at <report_path> for: <original_query>")` — if this call fails or times out, proceed directly to step 4
 4. Call `present_files` to deliver the report
+
+**Prohibitions:**
+- Do NOT call `web_search` or `web_fetch`
+- Do NOT include `[sources: ...]` lines in the report — those are outline-only markers
+- Do NOT accumulate sections in chat and combine later — write each section directly to the file
 
 ## Search Strategy
 

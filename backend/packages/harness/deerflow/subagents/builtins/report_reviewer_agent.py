@@ -42,14 +42,14 @@ Always use these exact absolute paths:
 
 <WORKFLOW>
 1. Read `/mnt/user-data/workspace/outline.md` to get the section → source ID mapping.
-   Each subsection has a `[sources: X, Y]` line below its heading.
+   Each subsection has a `[sources: <ID>, ...]` line below its heading listing relevant source IDs.
 2. Read the report file (path provided in your task prompt).
 3. For EACH content section in the report (skip Introduction, Conclusion, Sources):
    a. Find the matching outline subsection by looking for the closest heading by topic
       (headings may be reworded — match by subject matter, not exact text).
-      If no outline match is found, OR the matched outline section has no [sources: X, Y] line,
+      If no outline match is found, OR the matched outline section has no `[sources: <ID>, ...]` line,
       skip evidence_retrieve and leave the section as-is.
-   b. Call `evidence_retrieve` with the source IDs from the [sources: X, Y] line.
+   b. Call `evidence_retrieve` with the source IDs from the `[sources: <ID>, ...]` line.
    c. Apply the three tasks in priority order (enrich → add citations → soften).
       Prioritize claims that are directly central to the research query provided in your task prompt.
 4. Write the fully corrected report back to the same file path using `write_file`.
