@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import re
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 DEFAULT_GATEWAY_URL = "http://localhost:8001"
 DEFAULT_ASSISTANT_ID = "lead_agent"
+CUSTOM_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 
 DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
@@ -25,6 +27,16 @@ DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "subagent_enabled": False,
 }
 STREAM_UPDATE_MIN_INTERVAL_SECONDS = 0.35
+
+CHANNEL_CAPABILITIES = {
+    "feishu": {"supports_streaming": True},
+    "slack": {"supports_streaming": False},
+    "telegram": {"supports_streaming": False},
+}
+
+
+class InvalidChannelSessionConfigError(ValueError):
+    """Raised when IM channel session overrides contain invalid agent config."""
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -37,6 +49,21 @@ def _merge_dicts(*layers: Any) -> dict[str, Any]:
         if isinstance(layer, Mapping):
             merged.update(layer)
     return merged
+
+
+def _normalize_custom_agent_name(raw_value: str) -> str:
+    """Normalize legacy channel assistant IDs into valid custom agent names."""
+    normalized = raw_value.strip().lower().replace("_", "-")
+    if not normalized:
+        raise InvalidChannelSessionConfigError(
+            "Channel session assistant_id is empty. Use 'lead_agent' or a valid custom agent name."
+        )
+    if not CUSTOM_AGENT_NAME_PATTERN.fullmatch(normalized):
+        raise InvalidChannelSessionConfigError(
+            f"Invalid channel session assistant_id {raw_value!r}. "
+            "Use 'lead_agent' or a custom agent name containing only letters, digits, and hyphens."
+        )
+    return normalized
 
 
 def _extract_response_text(result: dict | list) -> str:
@@ -341,6 +368,10 @@ class ChannelManager:
         self._running = False
         self._task: asyncio.Task | None = None
 
+    @staticmethod
+    def _channel_supports_streaming(channel_name: str) -> bool:
+        return CHANNEL_CAPABILITIES.get(channel_name, {}).get("supports_streaming", False)
+
     def _resolve_session_layer(self, msg: InboundMessage) -> tuple[dict[str, Any], dict[str, Any]]:
         channel_layer = _as_dict(self._channel_sessions.get(msg.channel_name))
         users_layer = _as_dict(channel_layer.get("users"))
@@ -368,6 +399,13 @@ class ChannelManager:
             user_layer.get("context"),
             {"thread_id": thread_id},
         )
+
+        # Custom agents are implemented as lead_agent + agent_name context.
+        # Keep backward compatibility for channel configs that set
+        # assistant_id: <custom-agent-name> by routing through lead_agent.
+        if assistant_id != DEFAULT_ASSISTANT_ID:
+            run_context.setdefault("agent_name", _normalize_custom_agent_name(assistant_id))
+            assistant_id = DEFAULT_ASSISTANT_ID
 
         return assistant_id, run_config, run_context
 
@@ -442,6 +480,14 @@ class ChannelManager:
                     await self._handle_command(msg)
                 else:
                     await self._handle_chat(msg)
+            except InvalidChannelSessionConfigError as exc:
+                logger.warning(
+                    "Invalid channel session config for %s (chat=%s): %s",
+                    msg.channel_name,
+                    msg.chat_id,
+                    exc,
+                )
+                await self._send_error(msg, str(exc))
             except Exception:
                 logger.exception(
                     "Error handling message from %s (chat=%s)",
@@ -466,7 +512,7 @@ class ChannelManager:
         logger.info("[Manager] new thread created on LangGraph Server: thread_id=%s for chat_id=%s topic_id=%s", thread_id, msg.chat_id, msg.topic_id)
         return thread_id
 
-    async def _handle_chat(self, msg: InboundMessage) -> None:
+    async def _handle_chat(self, msg: InboundMessage, extra_context: dict[str, Any] | None = None) -> None:
         client = self._get_client()
 
         # Look up existing DeerFlow thread.
@@ -481,7 +527,9 @@ class ChannelManager:
             thread_id = await self._create_thread(client, msg)
 
         assistant_id, run_config, run_context = self._resolve_run_params(msg, thread_id)
-        if msg.channel_name == "feishu":
+        if extra_context:
+            run_context.update(extra_context)
+        if self._channel_supports_streaming(msg.channel_name):
             await self._handle_streaming_chat(
                 client,
                 msg,
@@ -635,6 +683,14 @@ class ChannelManager:
         parts = text.split(maxsplit=1)
         command = parts[0].lower().lstrip("/")
 
+        if command == "bootstrap":
+            from dataclasses import replace as _dc_replace
+
+            chat_text = parts[1] if len(parts) > 1 else "Initialize workspace"
+            chat_msg = _dc_replace(msg, text=chat_text, msg_type=InboundMessageType.CHAT)
+            await self._handle_chat(chat_msg, extra_context={"is_bootstrap": True})
+            return
+
         if command == "new":
             # Create a new thread on the LangGraph Server
             client = self._get_client()
@@ -656,7 +712,15 @@ class ChannelManager:
         elif command == "memory":
             reply = await self._fetch_gateway("/api/memory", "memory")
         elif command == "help":
-            reply = "Available commands:\n/new — Start a new conversation\n/status — Show current thread info\n/models — List available models\n/memory — Show memory status\n/help — Show this help"
+            reply = (
+                "Available commands:\n"
+                "/bootstrap — Start a bootstrap session (enables agent setup)\n"
+                "/new — Start a new conversation\n"
+                "/status — Show current thread info\n"
+                "/models — List available models\n"
+                "/memory — Show memory status\n"
+                "/help — Show this help"
+            )
         else:
             reply = f"Unknown command: /{command}. Type /help for available commands."
 

@@ -1,8 +1,11 @@
+import logging
 import os
 from pathlib import Path
 
 from .parser import parse_skill_file
 from .types import Skill
+
+logger = logging.getLogger(__name__)
 
 
 def get_skills_root_path() -> Path:
@@ -60,7 +63,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
         if not category_path.exists() or not category_path.is_dir():
             continue
 
-        for current_root, dir_names, file_names in os.walk(category_path):
+        for current_root, dir_names, file_names in os.walk(category_path, followlinks=True):
             # Keep traversal deterministic and skip hidden directories.
             dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))
             if "SKILL.md" not in file_names:
@@ -86,7 +89,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
             skill.enabled = extensions_config.is_skill_enabled(skill.name, skill.category)
     except Exception as e:
         # If config loading fails, default to all enabled
-        print(f"Warning: Failed to load extensions config: {e}")
+        logger.warning("Failed to load extensions config: %s", e)
 
     # Filter by enabled status if requested
     if enabled_only:

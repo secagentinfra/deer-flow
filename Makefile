@@ -3,6 +3,12 @@
 .PHONY: help config config-upgrade check install dev dev-daemon start stop up down clean docker-init docker-start docker-stop docker-logs docker-logs-frontend docker-logs-gateway
 
 PYTHON ?= python
+BASH ?= bash
+
+# Detect OS for Windows compatibility
+ifeq ($(OS),Windows_NT)
+    SHELL := cmd.exe
+endif
 
 help:
 	@echo "DeerFlow Development Commands:"
@@ -75,9 +81,13 @@ setup-sandbox:
 	fi; \
 	if command -v docker >/dev/null 2>&1; then \
 		echo "Pulling image using Docker..."; \
-		docker pull "$$IMAGE"; \
-		echo ""; \
-		echo "✓ Sandbox image pulled successfully"; \
+		if docker pull "$$IMAGE"; then \
+			echo ""; \
+			echo "✓ Sandbox image pulled successfully"; \
+		else \
+			echo ""; \
+			echo "⚠ Failed to pull sandbox image (this is OK for local sandbox mode)"; \
+		fi; \
 	else \
 		echo "✗ Neither Docker nor Apple Container is available"; \
 		echo "  Please install Docker: https://docs.docker.com/get-docker/"; \
@@ -86,11 +96,21 @@ setup-sandbox:
 
 # Start all services in development mode (with hot-reloading)
 dev:
+ifeq ($(OS),Windows_NT)
+	@echo "Detected Windows - using Git Bash..."
+	@$(BASH) ./scripts/serve.sh --dev
+else
 	@./scripts/serve.sh --dev
+endif
 
 # Start all services in production mode (with optimizations)
 start:
+ifeq ($(OS),Windows_NT)
+	@echo "Detected Windows - using Git Bash..."
+	@$(BASH) ./scripts/serve.sh --prod
+else
 	@./scripts/serve.sh --prod
+endif
 
 # Start all services in daemon mode (background)
 dev-daemon:

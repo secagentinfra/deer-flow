@@ -36,7 +36,47 @@ models:
 - OpenAI (`langchain_openai:ChatOpenAI`)
 - Anthropic (`langchain_anthropic:ChatAnthropic`)
 - DeepSeek (`langchain_deepseek:ChatDeepSeek`)
+- Claude Code OAuth (`deerflow.models.claude_provider:ClaudeChatModel`)
+- Codex CLI (`deerflow.models.openai_codex_provider:CodexChatModel`)
 - Any LangChain-compatible provider
+
+CLI-backed provider examples:
+
+```yaml
+models:
+  - name: gpt-5.4
+    display_name: GPT-5.4 (Codex CLI)
+    use: deerflow.models.openai_codex_provider:CodexChatModel
+    model: gpt-5.4
+    supports_thinking: true
+    supports_reasoning_effort: true
+
+  - name: claude-sonnet-4.6
+    display_name: Claude Sonnet 4.6 (Claude Code OAuth)
+    use: deerflow.models.claude_provider:ClaudeChatModel
+    model: claude-sonnet-4-6
+    max_tokens: 4096
+    supports_thinking: true
+```
+
+**Auth behavior for CLI-backed providers**:
+- `CodexChatModel` loads Codex CLI auth from `~/.codex/auth.json`
+- The Codex Responses endpoint currently rejects `max_tokens` and `max_output_tokens`, so `CodexChatModel` does not expose a request-level token cap
+- `ClaudeChatModel` accepts `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CLAUDE_CODE_CREDENTIALS_PATH`, or plaintext `~/.claude/.credentials.json`
+- On macOS, DeerFlow does not probe Keychain automatically. Use `scripts/export_claude_code_oauth.py` to export Claude Code auth explicitly when needed
+
+To use OpenAI's `/v1/responses` endpoint with LangChain, keep using `langchain_openai:ChatOpenAI` and set:
+
+```yaml
+models:
+  - name: gpt-5-responses
+    display_name: GPT-5 (Responses API)
+    use: langchain_openai:ChatOpenAI
+    model: gpt-5
+    api_key: $OPENAI_API_KEY
+    use_responses_api: true
+    output_version: responses/v1
+```
 
 For OpenAI-compatible gateways (for example Novita or OpenRouter), keep using `langchain_openai:ChatOpenAI` and set `base_url`:
 
@@ -95,6 +135,36 @@ models:
         thinking:
           type: enabled
 ```
+
+**Gemini with thinking via OpenAI-compatible gateway**:
+
+When routing Gemini through an OpenAI-compatible proxy (Vertex AI OpenAI compat endpoint, AI Studio, or third-party gateways) with thinking enabled, the API attaches a `thought_signature` to each tool-call object returned in the response.  Every subsequent request that replays those assistant messages **must** echo those signatures back on the tool-call entries or the API returns:
+
+```
+HTTP 400 INVALID_ARGUMENT: function call `<tool>` in the N. content block is
+missing a `thought_signature`.
+```
+
+Standard `langchain_openai:ChatOpenAI` silently drops `thought_signature` when serialising messages.  Use `deerflow.models.patched_openai:PatchedChatOpenAI` instead — it re-injects the tool-call signatures (sourced from `AIMessage.additional_kwargs["tool_calls"]`) into every outgoing payload:
+
+```yaml
+models:
+  - name: gemini-2.5-pro-thinking
+    display_name: Gemini 2.5 Pro (Thinking)
+    use: deerflow.models.patched_openai:PatchedChatOpenAI
+    model: google/gemini-2.5-pro-preview   # model name as expected by your gateway
+    api_key: $GEMINI_API_KEY
+    base_url: https://<your-openai-compat-gateway>/v1
+    max_tokens: 16384
+    supports_thinking: true
+    supports_vision: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+For Gemini accessed **without** thinking (e.g. via OpenRouter where thinking is not activated), the plain `langchain_openai:ChatOpenAI` with `supports_thinking: false` is sufficient and no patch is needed.
 
 ### Tool Groups
 
@@ -213,6 +283,14 @@ title:
   max_chars: 60
   model_name: null  # Use first model in list
 ```
+
+### GitHub API Token (Optional for GitHub Deep Research Skill)
+
+The default GitHub API rate limits are quite restrictive. For frequent project research, we recommend configuring a personal access token (PAT) with read-only permissions.
+
+**Configuration Steps**:
+1. Uncomment the `GITHUB_TOKEN` line in the `.env` file and add your personal access token
+2. Restart the DeerFlow service to apply changes
 
 ## Environment Variables
 

@@ -1,139 +1,66 @@
 """Memory updater for reading, writing, and updating memory data."""
 
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from deerflow.agents.memory.prompt import (
     MEMORY_UPDATE_PROMPT,
     format_conversation_for_update,
 )
+from deerflow.agents.memory.storage import get_memory_storage
 from deerflow.config.memory_config import get_memory_config
-from deerflow.config.paths import get_paths
 from deerflow.models import create_chat_model
 
-
-def _get_memory_file_path(agent_name: str | None = None) -> Path:
-    """Get the path to the memory file.
-
-    Args:
-        agent_name: If provided, returns the per-agent memory file path.
-                    If None, returns the global memory file path.
-
-    Returns:
-        Path to the memory file.
-    """
-    if agent_name is not None:
-        return get_paths().agent_memory_file(agent_name)
-
-    config = get_memory_config()
-    if config.storage_path:
-        p = Path(config.storage_path)
-        # Absolute path: use as-is; relative path: resolve against base_dir
-        return p if p.is_absolute() else get_paths().base_dir / p
-    return get_paths().memory_file
-
-
-def _create_empty_memory() -> dict[str, Any]:
-    """Create an empty memory structure."""
-    return {
-        "version": "1.0",
-        "lastUpdated": datetime.utcnow().isoformat() + "Z",
-        "user": {
-            "workContext": {"summary": "", "updatedAt": ""},
-            "personalContext": {"summary": "", "updatedAt": ""},
-            "topOfMind": {"summary": "", "updatedAt": ""},
-        },
-        "history": {
-            "recentMonths": {"summary": "", "updatedAt": ""},
-            "earlierContext": {"summary": "", "updatedAt": ""},
-            "longTermBackground": {"summary": "", "updatedAt": ""},
-        },
-        "facts": [],
-    }
-
-
-# Per-agent memory cache: keyed by agent_name (None = global)
-# Value: (memory_data, file_mtime)
-_memory_cache: dict[str | None, tuple[dict[str, Any], float | None]] = {}
-
+logger = logging.getLogger(__name__)
 
 def get_memory_data(agent_name: str | None = None) -> dict[str, Any]:
-    """Get the current memory data (cached with file modification time check).
-
-    The cache is automatically invalidated if the memory file has been modified
-    since the last load, ensuring fresh data is always returned.
-
-    Args:
-        agent_name: If provided, loads per-agent memory. If None, loads global memory.
-
-    Returns:
-        The memory data dictionary.
-    """
-    file_path = _get_memory_file_path(agent_name)
-
-    # Get current file modification time
-    try:
-        current_mtime = file_path.stat().st_mtime if file_path.exists() else None
-    except OSError:
-        current_mtime = None
-
-    cached = _memory_cache.get(agent_name)
-
-    # Invalidate cache if file has been modified or doesn't exist
-    if cached is None or cached[1] != current_mtime:
-        memory_data = _load_memory_from_file(agent_name)
-        _memory_cache[agent_name] = (memory_data, current_mtime)
-        return memory_data
-
-    return cached[0]
-
+    """Get the current memory data via storage provider."""
+    return get_memory_storage().load(agent_name)
 
 def reload_memory_data(agent_name: str | None = None) -> dict[str, Any]:
-    """Reload memory data from file, forcing cache invalidation.
+    """Reload memory data via storage provider."""
+    return get_memory_storage().reload(agent_name)
 
-    Args:
-        agent_name: If provided, reloads per-agent memory. If None, reloads global memory.
 
-    Returns:
-        The reloaded memory data dictionary.
+def _extract_text(content: Any) -> str:
+    """Extract plain text from LLM response content (str or list of content blocks).
+
+    Modern LLMs may return structured content as a list of blocks instead of a
+    plain string, e.g. [{"type": "text", "text": "..."}]. Using str() on such
+    content produces Python repr instead of the actual text, breaking JSON
+    parsing downstream.
+
+    String chunks are concatenated without separators to avoid corrupting
+    chunked JSON/text payloads. Dict-based text blocks are treated as full text
+    blocks and joined with newlines for readability.
     """
-    file_path = _get_memory_file_path(agent_name)
-    memory_data = _load_memory_from_file(agent_name)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        pieces: list[str] = []
+        pending_str_parts: list[str] = []
 
-    try:
-        mtime = file_path.stat().st_mtime if file_path.exists() else None
-    except OSError:
-        mtime = None
+        def flush_pending_str_parts() -> None:
+            if pending_str_parts:
+                pieces.append("".join(pending_str_parts))
+                pending_str_parts.clear()
 
-    _memory_cache[agent_name] = (memory_data, mtime)
-    return memory_data
+        for block in content:
+            if isinstance(block, str):
+                pending_str_parts.append(block)
+            elif isinstance(block, dict):
+                flush_pending_str_parts()
+                text_val = block.get("text")
+                if isinstance(text_val, str):
+                    pieces.append(text_val)
 
-
-def _load_memory_from_file(agent_name: str | None = None) -> dict[str, Any]:
-    """Load memory data from file.
-
-    Args:
-        agent_name: If provided, loads per-agent memory file. If None, loads global.
-
-    Returns:
-        The memory data dictionary.
-    """
-    file_path = _get_memory_file_path(agent_name)
-
-    if not file_path.exists():
-        return _create_empty_memory()
-
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-        return data
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Failed to load memory file: {e}")
-        return _create_empty_memory()
+        flush_pending_str_parts()
+        return "\n".join(pieces)
+    return str(content)
 
 
 # Matches sentences that describe a file-upload *event* rather than general
@@ -173,46 +100,13 @@ def _strip_upload_mentions_from_memory(memory_data: dict[str, Any]) -> dict[str,
     return memory_data
 
 
-def _save_memory_to_file(memory_data: dict[str, Any], agent_name: str | None = None) -> bool:
-    """Save memory data to file and update cache.
-
-    Args:
-        memory_data: The memory data to save.
-        agent_name: If provided, saves to per-agent memory file. If None, saves to global.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    file_path = _get_memory_file_path(agent_name)
-
-    try:
-        # Ensure directory exists
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Update lastUpdated timestamp
-        memory_data["lastUpdated"] = datetime.utcnow().isoformat() + "Z"
-
-        # Write atomically using temp file
-        temp_path = file_path.with_suffix(".tmp")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(memory_data, f, indent=2, ensure_ascii=False)
-
-        # Rename temp file to actual file (atomic on most systems)
-        temp_path.replace(file_path)
-
-        # Update cache and file modification time
-        try:
-            mtime = file_path.stat().st_mtime
-        except OSError:
-            mtime = None
-
-        _memory_cache[agent_name] = (memory_data, mtime)
-
-        print(f"Memory saved to {file_path}")
-        return True
-    except OSError as e:
-        print(f"Failed to save memory file: {e}")
-        return False
+def _fact_content_key(content: Any) -> str | None:
+    if not isinstance(content, str):
+        return None
+    stripped = content.strip()
+    if not stripped:
+        return None
+    return stripped
 
 
 class MemoryUpdater:
@@ -269,7 +163,7 @@ class MemoryUpdater:
             # Call LLM
             model = self._get_model()
             response = model.invoke(prompt)
-            response_text = str(response.content).strip()
+            response_text = _extract_text(response.content).strip()
 
             # Parse response
             # Remove markdown code blocks if present
@@ -289,13 +183,13 @@ class MemoryUpdater:
             updated_memory = _strip_upload_mentions_from_memory(updated_memory)
 
             # Save
-            return _save_memory_to_file(updated_memory, agent_name)
+            return get_memory_storage().save(updated_memory, agent_name)
 
         except json.JSONDecodeError as e:
-            print(f"Failed to parse LLM response for memory update: {e}")
+            logger.warning("Failed to parse LLM response for memory update: %s", e)
             return False
         except Exception as e:
-            print(f"Memory update failed: {e}")
+            logger.exception("Memory update failed: %s", e)
             return False
 
     def _apply_updates(
@@ -343,19 +237,28 @@ class MemoryUpdater:
             current_memory["facts"] = [f for f in current_memory.get("facts", []) if f.get("id") not in facts_to_remove]
 
         # Add new facts
+        existing_fact_keys = {fact_key for fact_key in (_fact_content_key(fact.get("content")) for fact in current_memory.get("facts", [])) if fact_key is not None}
         new_facts = update_data.get("newFacts", [])
         for fact in new_facts:
             confidence = fact.get("confidence", 0.5)
             if confidence >= config.fact_confidence_threshold:
+                raw_content = fact.get("content", "")
+                normalized_content = raw_content.strip()
+                fact_key = _fact_content_key(normalized_content)
+                if fact_key is not None and fact_key in existing_fact_keys:
+                    continue
+
                 fact_entry = {
                     "id": f"fact_{uuid.uuid4().hex[:8]}",
-                    "content": fact.get("content", ""),
+                    "content": normalized_content,
                     "category": fact.get("category", "context"),
                     "confidence": confidence,
                     "createdAt": now,
                     "source": thread_id or "unknown",
                 }
                 current_memory["facts"].append(fact_entry)
+                if fact_key is not None:
+                    existing_fact_keys.add(fact_key)
 
         # Enforce max facts limit
         if len(current_memory["facts"]) > config.max_facts:
