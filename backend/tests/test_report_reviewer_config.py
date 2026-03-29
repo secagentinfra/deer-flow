@@ -109,7 +109,10 @@ class TestTaskToolSubagentWiring:
         from deerflow.subagents.builtins import BUILTIN_SUBAGENTS
         from deerflow.tools.builtins.task_tool import task_tool
 
-        hints = typing.get_type_hints(task_tool.func, include_extras=True)
+        # StructuredTool from async @tool uses .coroutine; sync tools use .func.
+        impl = task_tool.func or task_tool.coroutine
+        assert impl is not None, "task_tool must expose .func or .coroutine for introspection"
+        hints = typing.get_type_hints(impl, include_extras=True)
         literal_type = hints["subagent_type"]
         allowed = set(typing.get_args(literal_type))
 
